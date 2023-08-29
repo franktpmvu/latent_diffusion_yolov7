@@ -1,0 +1,3 @@
+file_name top_left top_right bottom_left bottom_right
+1.jpg 111,117 189,121 112,148 187,157
+2.jpg 70,124 141,129 72,153 141,158

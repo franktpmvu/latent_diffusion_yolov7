@@ -1,0 +1,4 @@
+small model
+original 3 layers
+YOLOv4 original version
+300 epochs

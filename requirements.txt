@@ -1,0 +1,24 @@
+numpy
+opencv-python
+opencv-contrib-python
+scikit-image
+scikit-learn
+tqdm
+Pillow
+thop
+ninja
+matplotlib
+scipy
+easydict
+comet_ml
+einops
+torchgeometry
+pandas
+h5py
+seaborn
+#apt install ffmpeg
+#apt install git
+#git clone https://github.com/NVIDIA/apex
+#cd apex
+#pip install -v --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" ./
+#pip install -v --no-cache-dir ./
