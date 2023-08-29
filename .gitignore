@@ -3,4 +3,6 @@
 *.png
 *.jpg
 *.jpeg
-
+*.avi
+*.Avi
+*.weights
