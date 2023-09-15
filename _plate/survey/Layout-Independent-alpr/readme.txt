@@ -1,1 +1,0 @@
-https://web.inf.ufpr.br/vri/publications/layout-independent-alpr/

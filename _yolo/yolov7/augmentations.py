@@ -95,7 +95,8 @@ class mix_augmentaion(object):
         return output
 
     def add_rain_step(self,image, slant=None, drop_color=(200,200,200),step_ratio=1.0,return_slant=False):
-        imshape = image.shape
+        imshape = image.shape[:2]
+        #imshape = image.shape
 
             
         if slant is None:
@@ -103,6 +104,7 @@ class mix_augmentaion(object):
             
         if not imshape==self.imshape:
             self.rain_drops, self.rain_width = self.generate_random_lines(self.imshape, slant)
+            print('self.imshape = %s, imshape = %s.'%(str(self.imshape),str(imshape)))
 
         
         rain_drops = self.rain_drops

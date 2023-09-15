@@ -131,7 +131,9 @@ class IDetect(nn.Module):
                     self.grid[i] = self._make_grid(nx, ny).to(x[i].device)
 
                 y = x[i].sigmoid()
-                y[..., 0:2] = (y[..., 0:2] * 2. - 0.5 + self.grid[i]) * self.stride[i]  # xy
+                #print('self.grid[i] = '+str(self.grid[i].device))
+                #print('self.stride[i].device = '+str(self.stride[i].device))
+                y[..., 0:2] = (y[..., 0:2] * 2. - 0.5 + self.grid[i].to(y[..., 0:2].device)) * self.stride[i]  # xy
                 y[..., 2:4] = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # wh
                 z.append(y.view(bs, -1, self.no))
 
@@ -814,9 +816,14 @@ class Model_with_diffusion(Model):
         logger.info('')
     def create_subnetwork(self):
         
-        self.before_diffusion_model = self.subnetwork(self.model,0,14) 
+        self.before_diffusion_model = self.subnetwork(self.model,0,14)
         self.after_diffusion_model = self.subnetwork(self.model,15,77)
-
+        
+        for param in self.before_diffusion_model.parameters():
+            param.requires_grad=False
+        for param in self.after_diffusion_model.parameters():
+            param.requires_grad=False
+            
     def subnetwork(self, model, start_layer_idx, end_layer_idx):
         subnetwork = nn.Sequential()
         for idx, layer in enumerate(list(model)[start_layer_idx: end_layer_idx+1]):
@@ -824,48 +831,47 @@ class Model_with_diffusion(Model):
         return subnetwork
     
     def forward_submodel(self, x, submodel, init_y=None, output_y=False, profile=False):
-        with torch.no_grad():
-            y, dt = [], []  # outputs
+        y, dt = [], []  # outputs
 
-            if init_y is not None:
-                for _, before_y in enumerate(init_y):
-                    y.append(before_y)
-                    dt.append(0)
-                y[-1]=x
+        if init_y is not None:
+            for _, before_y in enumerate(init_y):
+                y.append(before_y)
+                dt.append(0)
+            y[-1]=x
 
-            for m in submodel:
-                #print(m.i)
-                if m.f != -1:  # if not from previous layer
-                    x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
+        for m in submodel:
+            #print(m.i)
+            if m.f != -1:  # if not from previous layer
+                x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
 
-                if not hasattr(self, 'traced'):
-                    self.traced=False
+            if not hasattr(self, 'traced'):
+                self.traced=False
 
-                if self.traced:
-                    if isinstance(m, Detect) or isinstance(m, IDetect) or isinstance(m, IAuxDetect) or isinstance(m, IKeypoint):
-                        break
-
-                if profile:
-                    c = isinstance(m, (Detect, IDetect, IAuxDetect, IBin))
-                    o = thop.profile(m, inputs=(x.copy() if c else x,), verbose=False)[0] / 1E9 * 2 if thop else 0  # FLOPS
-                    for _ in range(10):
-                        m(x.copy() if c else x)
-                    t = time_synchronized()
-                    for _ in range(10):
-                        m(x.copy() if c else x)
-                    dt.append((time_synchronized() - t) * 100)
-                    print('%10.1f%10.0f%10.1fms %-40s' % (o, m.np, dt[-1], m.type))
-
-                x = m(x)  # run
-
-                y.append(x if m.i in self.save else None)  # save output
+            if self.traced:
+                if isinstance(m, Detect) or isinstance(m, IDetect) or isinstance(m, IAuxDetect) or isinstance(m, IKeypoint):
+                    break
 
             if profile:
-                print('%.1fms total' % sum(dt))
-            if output_y:
-                return x,y
-            else:
-                return x
+                c = isinstance(m, (Detect, IDetect, IAuxDetect, IBin))
+                o = thop.profile(m, inputs=(x.copy() if c else x,), verbose=False)[0] / 1E9 * 2 if thop else 0  # FLOPS
+                for _ in range(10):
+                    m(x.copy() if c else x)
+                t = time_synchronized()
+                for _ in range(10):
+                    m(x.copy() if c else x)
+                dt.append((time_synchronized() - t) * 100)
+                print('%10.1f%10.0f%10.1fms %-40s' % (o, m.np, dt[-1], m.type))
+
+            x = m(x)  # run
+
+            y.append(x if m.i in self.save else None)  # save output
+
+        if profile:
+            print('%.1fms total' % sum(dt))
+        if output_y:
+            return x,y
+        else:
+            return x
 
 
 

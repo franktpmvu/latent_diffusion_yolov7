@@ -1,0 +1,2 @@
+#python celebA_noise_128.py --time_steps 200 --sampling_routine x0_step_down --save_folder ./data/licence_plate/Cold-Diffusion-Models/output/ --data_path /data/licence_plate/Cold-Diffusion-Models/data/
+python AFHQ_noise_128.py --time_steps 200 --sampling_routine x0_step_down --save_folder /data/licence_plate/Cold-Diffusion-Models/output/ --data_path /data/dataset/afhq/train/
