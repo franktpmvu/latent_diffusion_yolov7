@@ -26,6 +26,7 @@ from torch import linalg as LA
 from licenceplate_deaug_pytorch.augmentations import mix_augmentaion
 import cv2
 from random import randint
+import wandb
 
 try:
     from apex import amp
@@ -1066,6 +1067,31 @@ class Trainer(object):
                 self.load(load_path)
             else:
                 self.load_nonstrict(load_path)
+                
+        wandb.init(
+            project="diffusion_image_2loss_512",
+            config={
+            'ema_decay':ema_decay,
+            'image_size':image_size,
+            'train_batch_size':train_batch_size,
+            'eval_batch_size':eval_batch_size,
+            'train_lr':train_lr,
+            'train_num_steps':train_num_steps,
+            'gradient_accumulate_every':gradient_accumulate_every,
+            'fp16':fp16,
+            'step_start_ema':step_start_ema,
+            'update_ema_every':update_ema_every,
+            'save_and_sample_every':save_and_sample_every,
+            'results_folder':results_folder,
+            'load_path':load_path,
+            'dataset':dataset,
+            'shuffle':shuffle,
+            'eval_data_folder':eval_data_folder,
+            'eval_data_label_folder':eval_data_label_folder
+            }
+
+        )
+
 
 
     def reset_parameters(self):
@@ -1134,6 +1160,8 @@ class Trainer(object):
                 print(f'{self.step}: {loss.item()}')
                 u_loss += loss.item()
                 backwards(loss / self.gradient_accumulate_every, self.opt)
+                wandb.log({"loss": loss.item(),'step':self.step})
+
 
             acc_loss = acc_loss + (u_loss/self.gradient_accumulate_every)
 
@@ -1155,6 +1183,7 @@ class Trainer(object):
 
                 #data_blur = (data_blur + 1) * 0.5
                 utils.save_image(data, str(self.results_folder / f'sample-og-{milestone}.png'), nrow=6)
+                wandb.Image(str(self.results_folder / f'sample-og-{milestone}.png')
                 #print('torch.max(og_img)='+str(torch.max(og_img)))
                 #print('torch.min(og_img)='+str(torch.min(og_img)))
 
@@ -1172,6 +1201,7 @@ class Trainer(object):
                 #direct_recons = (x_recon + 1) * 0.5
                 #direct_recons = torch.clamp(x_recon, min=0.0)
                 utils.save_image(x_recon, str(self.results_folder / f'sample-direct_recons-{milestone}.png'), nrow=6)
+                wandb.Image(str(self.results_folder / f'sample-direct_recons-{milestone}.png')
                 #print('torch.max(direct_recons)='+str(torch.max(direct_recons)))
                 #print('torch.min(direct_recons)='+str(torch.min(direct_recons)))
 
@@ -1180,6 +1210,7 @@ class Trainer(object):
                 #xt = torch.clamp(xt, min=0.0)
                 utils.save_image(data_blur, str(self.results_folder / f'sample-xt-{milestone}.png'),
                                  nrow=6)
+                wandb.Image(str(self.results_folder / f'sample-xt-{milestone}.png')
                 #print('torch.max(xt)='+str(torch.max(xt)))
                 #print('torch.min(xt)='+str(torch.min(xt)))
 
@@ -1187,6 +1218,8 @@ class Trainer(object):
                 acc_loss = acc_loss/(self.save_and_sample_every+1)
 
                 print(f'Mean of last {self.step}: {acc_loss}')
+                wandb.log({"mean_acc_loss": acc_loss})
+
                 acc_loss=0
 
                 self.save()
