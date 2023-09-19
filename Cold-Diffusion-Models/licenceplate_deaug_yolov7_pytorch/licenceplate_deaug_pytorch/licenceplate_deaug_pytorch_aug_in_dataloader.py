@@ -1166,28 +1166,28 @@ class Trainer(object):
                 self.load(load_path)
             else:
                 self.load_nonstrict(load_path)
-                
-        wandb.init(
-            project="diffusion_latent_512",
-            config={
-            'ema_decay':ema_decay,
-            'image_size':image_size,
-            'train_batch_size':train_batch_size,
-            'eval_batch_size':eval_batch_size,
-            'train_lr':train_lr,
-            'train_num_steps':train_num_steps,
-            'gradient_accumulate_every':gradient_accumulate_every,
-            'fp16':fp16,
-            'step_start_ema':step_start_ema,
-            'update_ema_every':update_ema_every,
-            'save_and_sample_every':save_and_sample_every,
-            'results_folder':results_folder,
-            'load_path':load_path,
-            'dataset':dataset,
-            'shuffle':shuffle,
-            'eval_data_folder':eval_data_folder,
-            'eval_data_label_folder':eval_data_label_folder
-            }
+        if not test_mode:
+            wandb.init(
+                project="diffusion_latent_512",
+                config={
+                'ema_decay':ema_decay,
+                'image_size':image_size,
+                'train_batch_size':train_batch_size,
+                'eval_batch_size':eval_batch_size,
+                'train_lr':train_lr,
+                'train_num_steps':train_num_steps,
+                'gradient_accumulate_every':gradient_accumulate_every,
+                'fp16':fp16,
+                'step_start_ema':step_start_ema,
+                'update_ema_every':update_ema_every,
+                'save_and_sample_every':save_and_sample_every,
+                'results_folder':results_folder,
+                'load_path':load_path,
+                'dataset':dataset,
+                'shuffle':shuffle,
+                'eval_data_folder':eval_data_folder,
+                'eval_data_label_folder':eval_data_label_folder
+                }
 
         )
 
