@@ -472,7 +472,6 @@ class GaussianDiffusion(nn.Module):
 
     @torch.no_grad()
     def all_sample(self, batch_size=16, img=None, t=None, times=None, eval=True, outputcuda=False):
-
         if eval:
             self.denoise_fn.eval()
 
@@ -486,6 +485,7 @@ class GaussianDiffusion(nn.Module):
             step = torch.full((batch_size,), t - 1, dtype=torch.long).cuda()
             x1_bar = self.denoise_fn(img, step)
             x2_bar = self.get_x2_bar_from_xt(x1_bar, img, step)
+
 
             if outputcuda:
                 X1_0s.append(x1_bar.detach())
@@ -510,8 +510,6 @@ class GaussianDiffusion(nn.Module):
             t = t - 1
 
         return X1_0s, X_ts
-
-    
 
     def q_sample(self, x_start, x_end, t):
         # simply use the alphas to interpolate

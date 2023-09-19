@@ -1,15 +1,15 @@
-from licenceplate_deaug_pytorch.licenceplate_deaug_pytorch_aug_in_dataloader import Unet, GaussianDiffusion, Trainer
+from licenceplate_deaug_pytorch.licenceplate_demix_pytorch_aug_in_dataloader import Unet, GaussianDiffusion, Trainer
 import torchvision
 import argparse
 import sys
 import torch
-sys.path.append('/data/licence_plate/_yolo/yolov7/')
+sys.path.append('/data/frank/licence_plate/_yolo/yolov7/')
 from models.yolo_with_diffusion import Model_with_diffusion
 import yaml
 
-#cfgyolotiny='/data/licence_plate/_yolo/yolov7/cfg/training/yolov7-tiny.yaml'
-#hypyolotiny='/data/licence_plate/_yolo/yolov7/cfg/deploy/hyp.scratch.tiny.yaml'
-#best_288_state_dict='/data/licence_plate/_yolo/yolov7/runs/train/exp2/weights/best_288_state_dict.pt'
+#cfgyolotiny='//data/frank/licence_plate//_yolo/yolov7/cfg/training/yolov7-tiny.yaml'
+#hypyolotiny='//data/frank/licence_plate//_yolo/yolov7/cfg/deploy/hyp.scratch.tiny.yaml'
+#best_288_state_dict='//data/frank/licence_plate//_yolo/yolov7/runs/train/exp2/weights/best_288_state_dict.pt'
 #nc=35
 #with open(hypyolotiny) as f:
 #    hyp = yaml.load(f, Loader=yaml.SafeLoader)  # load hyps
@@ -24,20 +24,18 @@ parser.add_argument('--time_steps', default=50, type=int)
 parser.add_argument('--train_steps', default=700000, type=int)
 parser.add_argument('--save_folder', default='./results_AOLP', type=str)
 parser.add_argument('--load_path', default=None, type=str)
-parser.add_argument('--data_path_1', default='/data/licence_plate/_plate/generated_data/result2/img/', type=str)
-parser.add_argument('--data_path_2', default='/data/licence_plate/_plate/generated_data/result3/img/', type=str)
+parser.add_argument('--data_path_1', default='/data/frank/licence_plate/_plate/generated_data/result2/img/', type=str)
+parser.add_argument('--data_path_2', default='/data/frank/licence_plate/_plate/generated_data/result3/img/', type=str)
 parser.add_argument('--aug_routine', default='Default', type=str)
 parser.add_argument('--train_routine', default='Final', type=str)
 parser.add_argument('--sampling_routine', default='x0_step_down', type=str)
 parser.add_argument('--remove_time_embed', action="store_true")
 parser.add_argument('--residual', action="store_true")
-parser.add_argument('--loss_type', default='l1', type=str)#l1,l1_with_last_layer
-parser.add_argument('--yolomodel', default='/data/licence_plate/_yolo/yolov7/runs/train/exp2/weights/best_288_state_dict.pt', type=str)
-parser.add_argument('--yolohyperparam', default='/data/licence_plate/_yolo/yolov7/cfg/deploy/hyp.scratch.tiny.yaml', type=str)
-parser.add_argument('--yolocfg', default='/data/licence_plate/_yolo/yolov7/cfg/training/yolov7-tiny.yaml', type=str)
+parser.add_argument('--loss_type', default='l1', type=str)
+parser.add_argument('--yolomodel', default='/data/frank/licence_plate/_yolo/yolov7/runs/train/exp2/weights/best_288_state_dict.pt', type=str)
+parser.add_argument('--yolohyperparam', default='/data/frank/licence_plate/_yolo/yolov7/cfg/deploy/hyp.scratch.tiny.yaml', type=str)
+parser.add_argument('--yolocfg', default='/data/frank/licence_plate/_yolo/yolov7/cfg/training/yolov7-tiny.yaml', type=str)
 parser.add_argument('--yoloclass', default=35, type=int)
-parser.add_argument('--eval_data_path', default='/data/licence_plate/_plate/generated_data/result4/img/', type=str)
-parser.add_argument('--eval_data_label_path', default='/data/licence_plate/_plate/generated_data/result4/label.txt', type=str)
 
 
 args = parser.parse_args()
@@ -51,8 +49,6 @@ yolomodel.load_state_dict(torch.load(args.yolomodel))
 yolomodel.eval()
 yolomodel.create_subnetwork()
 yolomodel = torch.nn.DataParallel(yolomodel, device_ids=range(torch.cuda.device_count()))
-
-#yolomodel = torch.nn.DataParallel(yolomodel, device_ids=range(torch.cuda.device_count()))
 
 #def preproccess_img(img_path):
 #    img = cv2.imread(img_path)
@@ -81,7 +77,7 @@ model = Unet(
 
 diffusion = GaussianDiffusion(
     model,
-    image_size = 128,
+    image_size = 64,
     device_of_kernel = 'cuda',
     channels = 128,
     timesteps = args.time_steps,        # number of steps
@@ -98,8 +94,8 @@ diffusion = torch.nn.DataParallel(diffusion, device_ids=range(torch.cuda.device_
 trainer = Trainer(
     diffusion,
     [args.data_path_1,args.data_path_2],
-    image_size = 1024,
-    train_batch_size = 16,
+    image_size = 512,
+    train_batch_size = 32,
     train_lr = 2e-5,
     train_num_steps = args.train_steps, # total training steps
     gradient_accumulate_every = 2,      # gradient accumulation steps
@@ -107,9 +103,7 @@ trainer = Trainer(
     fp16 = False,                       # turn on mixed precision training with apex
     results_folder = args.save_folder,
     load_path = args.load_path,
-    dataset = 'AOLP',
-    eval_data_folder = args.eval_data_path,
-    eval_data_label_folder = args.eval_data_label_path
+    dataset = 'AOLP'
 )
 
 trainer.train()
