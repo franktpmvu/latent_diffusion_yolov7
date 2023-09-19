@@ -40,14 +40,13 @@ parser.add_argument('--eval_data_path', default='/data/licence_plate/_plate/gene
 parser.add_argument('--eval_data_label_path', default='/data/licence_plate/_plate/generated_data/result4/label.txt', type=str)
 
 
-
 args = parser.parse_args()
 print(args)
 
 with open(args.yolohyperparam) as f:
     hyp = yaml.load(f, Loader=yaml.SafeLoader)  # load hyps
     
-yolomodel = Model_with_diffusion(args.yolocfg, ch=3, nc=args.yoloclass, anchors=hyp.get('anchors')).to('cuda') # create
+yolomodel = Model_with_diffusion(args.yolocfg, ch=3, nc=args.yoloclass, anchors=hyp.get('anchors')).cuda() # create
 yolomodel.load_state_dict(torch.load(args.yolomodel))
 yolomodel.eval()
 yolomodel.create_subnetwork()
@@ -82,7 +81,7 @@ model = Unet(
 
 diffusion = GaussianDiffusion(
     model,
-    image_size = 128,
+    image_size = 64,
     device_of_kernel = 'cuda',
     channels = 128,
     timesteps = args.time_steps,        # number of steps
@@ -99,8 +98,9 @@ diffusion = torch.nn.DataParallel(diffusion, device_ids=range(torch.cuda.device_
 trainer = Trainer(
     diffusion,
     [args.data_path_1,args.data_path_2],
-    image_size = 1024,
+    image_size = 512,
     train_batch_size = 16,
+    eval_batch_size = 64,
     train_lr = 2e-5,
     train_num_steps = args.train_steps, # total training steps
     gradient_accumulate_every = 2,      # gradient accumulation steps

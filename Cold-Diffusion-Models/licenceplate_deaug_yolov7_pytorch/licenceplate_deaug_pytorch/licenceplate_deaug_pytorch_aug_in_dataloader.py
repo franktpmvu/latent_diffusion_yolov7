@@ -24,8 +24,12 @@ import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 from torch import linalg as LA
 from licenceplate_deaug_pytorch.augmentations import mix_augmentaion
+from licenceplate_deaug_pytorch.yolo_utils import eval_dataset, non_max_suppression, affine_transform
+
 import cv2
 from random import randint
+import wandb
+
 
 try:
     from apex import amp
@@ -79,6 +83,9 @@ def loss_backwards(fp16, loss, optimizer, **kwargs):
             scaled_loss.backward(**kwargs)
     else:
         loss.backward(**kwargs)
+        
+        
+
 
 # small helper modules
 
@@ -493,6 +500,7 @@ class GaussianDiffusion(nn.Module):
         #print(img.shape)
         
         x_start_latent = self.yolomodel.module.forward_submodel(img,self.yolomodel.module.before_diffusion_model)
+        #x_start_latent = self.yolomodel(img,mode='before')
         #print(x_start_latent.shape)
 
         if t==None:
@@ -510,6 +518,7 @@ class GaussianDiffusion(nn.Module):
         #print(xt.shape)
 
         x_blur_latent = self.yolomodel.module.forward_submodel(xt,self.yolomodel.module.before_diffusion_model)
+        #x_blur_latent = self.yolomodel(xt,mode='before')
         #print(x_blur_latent)
         #print(x_blur_latent.shape)
         step = torch.full((batch_size,), t - 1, dtype=torch.long).cuda()
@@ -523,6 +532,28 @@ class GaussianDiffusion(nn.Module):
         direct_recons = None
 
         return xt, direct_recons, img
+    
+    @torch.no_grad()
+    def forward_yolo(self, batch_size = 16, img=None, t=None):
+        
+        x_latent,y = self.yolomodel.module.forward_submodel(img,self.yolomodel.module.before_diffusion_model,output_y=True)
+        #x_latent,y = self.yolomodel(img,mode='before',output_y=True)
+
+        if t==None:
+            t=self.num_timesteps
+            step = torch.full((batch_size,), t - 1, dtype=torch.long).cuda()
+        else:
+            step = t
+        #print(x_latent.shape)
+        #print(step.shape)
+        x_recon = self.denoise_fn(x_latent, step)
+        
+        y[-1]=x_recon
+        x_recon_yolo = self.yolomodel.module.forward_submodel(x_recon,self.yolomodel.module.after_diffusion_model,init_y=y)
+        #x_recon_yolo = self.yolomodel(x_recon,mode='after',init_y=y)
+        x_recon_yolo = non_max_suppression(x_recon_yolo[0], labels=[], multi_label=True)
+
+        return x_recon_yolo
 
     
     @torch.no_grad()
@@ -755,6 +786,10 @@ class GaussianDiffusion(nn.Module):
 
         x_start_latent,y_start = self.yolomodel.module.forward_submodel(x_start,self.yolomodel.module.before_diffusion_model,output_y=True)
         x_blur_latent,y = self.yolomodel.module.forward_submodel(x_blur,self.yolomodel.module.before_diffusion_model,output_y=True)
+        #print(self.yolomodel.device)
+        #print(x_start.device)
+        #x_start_latent,y_start = self.yolomodel(x_start,mode='before',output_y=True)
+        #x_blur_latent,y = self.yolomodel(x_blur,mode='before',output_y=True)
 
         x_recon = self.denoise_fn(x_blur_latent, t)
 
@@ -763,15 +798,17 @@ class GaussianDiffusion(nn.Module):
             
         elif self.loss_type == 'l1_with_last_layer':
             x_start_yolo = self.yolomodel.module.forward_submodel(x_start_latent,self.yolomodel.module.after_diffusion_model,init_y=y_start)
+            #x_start_yolo = self.yolomodel(x_start_latent,mode='after',init_y=y_start)
             
             y[-1]=x_recon
             x_recon_yolo = self.yolomodel.module.forward_submodel(x_recon,self.yolomodel.module.after_diffusion_model,init_y=y)
+            #x_recon_yolo = self.yolomodel(x_recon,mode='after',init_y=y)
             loss_latent = (x_start_latent - x_recon).abs().mean()
             
             x_start_yolo_1d = self.change_yolo_detect_to_1d(x_start_yolo,b)
             x_recon_yolo_1d = self.change_yolo_detect_to_1d(x_recon_yolo,b)
             loss_last_yolo = (x_start_yolo_1d - x_recon_yolo_1d).abs().mean()
-            print('loss_latent = %.05f, loss_last_yolo = %.05f'%(loss_latent,loss_last_yolo))
+            #print('loss_latent = %.05f, loss_last_yolo = %.05f'%(loss_latent,loss_last_yolo))
             loss = loss_latent+loss_last_yolo
             
         elif self.loss_type == 'l2':
@@ -800,6 +837,8 @@ class GaussianDiffusion(nn.Module):
             
             x_start_latent = self.yolomodel.module.forward_submodel(x_start,self.yolomodel.module.before_diffusion_model)
             x_blur_latent = self.yolomodel.module.forward_submodel(x_blur,self.yolomodel.module.before_diffusion_model)
+            #x_start_latent = self.yolomodel(x_start,mode='before')
+            #x_blur_latent = self.yolomodel(x_blur,mode='before')
             
             x_recon = self.denoise_fn(x_blur_latent, t)
 
@@ -926,26 +965,79 @@ class GaussianDiffusion(nn.Module):
 # dataset classes
 
     
+    
 class Dataset_cv2_aug_step(data.Dataset):
-    def __init__(self, folder, augmenter, image_size, exts = ['jpg', 'jpeg', 'png']):
+    def __init__(self, folder, augmenter, image_size, exts = ['jpg', 'jpeg', 'png'], evalMode=False, labelTxtFolder=None):
         super().__init__()
         self.folder = folder
         self.image_size = image_size
         self.augmenter = augmenter
+        self.evalMode = evalMode
         #self.paths = [p for ext in exts for p in Path(f'{folder}').glob(f'**/*.{ext}')]
         self.paths=[]
+        self.bname=[]
         for _folder in folder:
             _path = [p for ext in exts for p in Path(f'{_folder}').glob(f'**/*.{ext}')]
+            _bname = [os.path.splitext(os.path.split(x)[-1])[0] for x in _path]
+            #print(_bname)
             self.paths=self.paths+_path
-        
+            self.bname=self.bname+_bname
+        if self.evalMode:
+            if labelTxtFolder is not None:
+                self.loadLabel(labelTxtFolder)
+            else:
+                print('you need eval label')
+                dsa
+
     def __len__(self):
         return len(self.paths)
+    
+    def loadLabel(self, label_txt):
+        label_data = {}
+        #label_txt = '/data/licence_plate/_plate/AOLP/label.txt'
+        #label_txt = '/data/licence_plate/_plate/generated_data/result2/label.txt'
+
+        #label_txt = 'E:/MTL_FTP/ChengJungC/dataset/AOLP/label.txt'
+        #label_txt = 'E:/MTL_FTP/ChengJungC/dataset/weather/label.txt'
+        label_file = open(label_txt, 'r')
+        lines = label_file.readlines()
+        for line in lines:
+            l = line.strip().split(' ')
+            name = l[0]
+            plates = l[1:]
+            label_data[name] = plates
+        self.label_data = label_data
+        
+    def getMetaFromHWC(self, h, w, c, size):
+        #h,w,c=img.shape
+        #img, meta = resize(img, input_size)
+        #print(meta)
+    
+        #M=getMetaFromHWC(h,w,c,input_size)
+        #print(M)
+
+        if not (h == size and w == size):
+            scale_x = float(size / w)
+            scale_y = float(size / h)
+            ratio = min(scale_x, scale_y)
+            nw, nh = int(w*ratio), int(h*ratio)
+
+            dw, dh = (size-nw)//2, (size-nh)//2
+            meta = {'nw': nw, 'nh': nh, 'dw': dw, 'dh': dh, 'w': w, 'h': h}
+            return  meta
+        else:
+            meta = {}
+            return  meta
+
+
 
     def __getitem__(self, index):
         path = self.paths[index]
+        bname = self.bname[index]
         #print(path)
         img = cv2.imread(str(path))
-        img, _ = self.resize(img, self.image_size)
+        img, meta = self.resize(img, self.image_size)
+        
         
         step = randint(0,99)
         img_blur = self.augmenter.mix_aug(copy.deepcopy(img), step*0.01, random=True)
@@ -957,7 +1049,11 @@ class Dataset_cv2_aug_step(data.Dataset):
         #img = torch.unsqueeze(img, 0)
         #img = img.half()
         #print(img.shape)
-        return [img_torch, img_blur_torch, step]
+        if self.evalMode:
+            return [img_torch, img_blur_torch, step, meta, bname]
+
+        else:
+            return [img_torch, img_blur_torch, step]
     
     def npytotorch(self, img):
         img = (img / 255.).astype(np.float32)
@@ -999,6 +1095,7 @@ class Trainer(object):
         yolomodel = None,
         image_size = 128,
         train_batch_size = 32,
+        eval_batch_size = 32,
         train_lr = 2e-5,
         train_num_steps = 100000,
         gradient_accumulate_every = 2,
@@ -1011,7 +1108,9 @@ class Trainer(object):
         load_path = None,
         dataset = None,
         shuffle=True,
-        test_mode=False
+        test_mode=False,
+        eval_data_folder=None,
+        eval_data_label_folder=None
     ):
         super().__init__()
         self.model = diffusion_model
@@ -1023,6 +1122,7 @@ class Trainer(object):
         self.save_and_sample_every = save_and_sample_every
 
         self.batch_size = train_batch_size
+        self.eval_batch_size = eval_batch_size
         self.image_size = image_size#diffusion_model.module.image_size
         self.gradient_accumulate_every = gradient_accumulate_every
         self.train_num_steps = train_num_steps
@@ -1031,11 +1131,17 @@ class Trainer(object):
         self.aug_licence.random_parameter()
         print(self.aug_licence.imshape)
         #self.aug_licence.random_parameter()
+        self.eval = None
+        if eval_data_folder is not None:
+            self.evalDs = Dataset_cv2_aug_step([eval_data_folder], self.aug_licence, image_size, evalMode=True, labelTxtFolder=eval_data_label_folder)
+            self.evalDl = data.DataLoader(self.evalDs, batch_size = eval_batch_size, shuffle=False, pin_memory=True, num_workers=32)
+            self.eval=True
+            print('eval data in %s loading complete.'%str(eval_data_folder))
 
             
         self.ds = Dataset_cv2_aug_step(folder, self.aug_licence, image_size)
 
-        self.dl = cycle(data.DataLoader(self.ds, batch_size = train_batch_size, shuffle=shuffle, pin_memory=True, num_workers=32))
+        self.dl = cycle(data.DataLoader(self.ds, batch_size = eval_batch_size, shuffle=shuffle, pin_memory=True, num_workers=32,drop_last=True))
         #self.opt = Adam(diffusion_model.parameters(), lr=train_lr)
         self.opt = Adam(filter(lambda p:p.requires_grad, diffusion_model.parameters()), lr=train_lr)
         #torch.autograd.set_detect_anomaly(True)
@@ -1060,6 +1166,31 @@ class Trainer(object):
                 self.load(load_path)
             else:
                 self.load_nonstrict(load_path)
+                
+        wandb.init(
+            project="diffusion_latent_512",
+            config={
+            'ema_decay':ema_decay,
+            'image_size':image_size,
+            'train_batch_size':train_batch_size,
+            'eval_batch_size':eval_batch_size,
+            'train_lr':train_lr,
+            'train_num_steps':train_num_steps,
+            'gradient_accumulate_every':gradient_accumulate_every,
+            'fp16':fp16,
+            'step_start_ema':step_start_ema,
+            'update_ema_every':update_ema_every,
+            'save_and_sample_every':save_and_sample_every,
+            'results_folder':results_folder,
+            'load_path':load_path,
+            'dataset':dataset,
+            'shuffle':shuffle,
+            'eval_data_folder':eval_data_folder,
+            'eval_data_label_folder':eval_data_label_folder
+            }
+
+        )
+
 
 
     def reset_parameters(self):
@@ -1075,7 +1206,8 @@ class Trainer(object):
         data = {
             'step': self.step,
             'model': self.model.state_dict(),
-            'ema': self.ema_model.state_dict()
+            'ema': self.ema_model.state_dict(),
+            'best_licence_detect_gt':self.best_licence_detect_gt
         }
         if itrs is None:
             torch.save(data, str(self.results_folder / f'model.pt'))
@@ -1088,6 +1220,10 @@ class Trainer(object):
 
         self.step = data['step']
         print("Step : ", str(data['step']))
+        if 'best_licence_detect_gt' in data.keys():
+            self.best_licence_detect_gt=data['best_licence_detect_gt']
+        else:
+            self.best_licence_detect_gt=0
 
         #print(data['step'])
         #print(data['model'])
@@ -1100,6 +1236,10 @@ class Trainer(object):
 
         self.step = data['step']
         print("Step : ", str(data['step']))
+        if 'best_licence_detect_gt' in data.keys():
+            self.best_licence_detect_gt=data['best_licence_detect_gt']
+        else:
+            self.best_licence_detect_gt=0
 
         #print(data['step'])
         #print(data['model'])
@@ -1110,7 +1250,7 @@ class Trainer(object):
     def train(self):
 
         backwards = partial(loss_backwards, self.fp16)
-
+        
         acc_loss = 0
         while self.step < self.train_num_steps:
             u_loss = 0
@@ -1128,6 +1268,7 @@ class Trainer(object):
                 print(f'{self.step}: {loss.item()}')
                 u_loss += loss.item()
                 backwards(loss / self.gradient_accumulate_every, self.opt)
+                wandb.log({"loss": loss.item(),'step':self.step})
 
             acc_loss = acc_loss + (u_loss/self.gradient_accumulate_every)
 
@@ -1179,11 +1320,45 @@ class Trainer(object):
                 acc_loss = acc_loss/(self.save_and_sample_every+1)
 
                 print(f'Mean of last {self.step}: {acc_loss}')
+                wandb.log({"mean_acc_loss": acc_loss})
+
                 acc_loss=0
 
                 self.save()                
                 if self.step % (self.save_and_sample_every * 100) == 0:
                     self.save(self.step)
+                    
+                if self.step % (self.save_and_sample_every * 10) == 0 and self.eval is not None:
+                    with torch.no_grad():
+                        yolo_results = {}
+
+                        for iEval, dataEval in enumerate(self.evalDl):
+                            print('eval in step %d: %d / %d'%(self.step, iEval, self.evalDs.__len__()//self.eval_batch_size))
+                            _, data_blur, step, meta, bname = dataEval
+                            #print(meta)
+                            data_blur = data_blur.cuda()
+                            step = step.cuda()
+                            #print(data_blur.shape)
+                            #print(bname)
+                            yolo_output = self.ema_model.module.forward_yolo(img=data_blur, t=step, batch_size=data_blur.shape[0])
+                            
+                            for index_yolooutput , _yolo_output in enumerate(yolo_output):
+                                if _yolo_output is not None:
+                                    sub_meta = {}
+                                    for metakey in meta.keys():
+                                        sub_meta[metakey] = meta[metakey][index_yolooutput]
+                                        
+                                    output = affine_transform(_yolo_output, sub_meta)
+                                    yolo_results[bname[index_yolooutput]] = output
+                        eval_dict = eval_dataset(yolo_results, self.evalDs.label_data)
+                        licence_detect_gt = eval_dict['plate_detect_gt']
+                        wandb.log(eval_dict)
+
+                        
+                        if licence_detect_gt>self.best_licence_detect_gt:
+                            self.best_licence_detect_gt=licence_detect_gt
+                            print('best_licence_detect_gt = %f'%self.best_licence_detect_gt)
+                            self.save('best_%s_%0.3f'%(str(self.step),self.best_licence_detect_gt))
 
 
             self.step += 1

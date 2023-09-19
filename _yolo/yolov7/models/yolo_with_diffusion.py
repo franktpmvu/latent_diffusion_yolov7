@@ -770,7 +770,7 @@ class Model_with_diffusion(Model):
         m = self.model[-1]  # Detect()
         if isinstance(m, Detect):
             s = 256  # 2x min stride
-            m.stride = torch.tensor([s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, s, s))])  # forward
+            m.stride = torch.tensor([s / x.shape[-2] for x in self.forward_test(torch.zeros(1, ch, s, s))])  # forward
             check_anchor_order(m)
             m.anchors /= m.stride.view(-1, 1, 1)
             self.stride = m.stride
@@ -778,7 +778,7 @@ class Model_with_diffusion(Model):
             # print('Strides: %s' % m.stride.tolist())
         if isinstance(m, IDetect):
             s = 256  # 2x min stride
-            m.stride = torch.tensor([s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, s, s))])  # forward
+            m.stride = torch.tensor([s / x.shape[-2] for x in self.forward_test(torch.zeros(1, ch, s, s))])  # forward
             check_anchor_order(m)
             m.anchors /= m.stride.view(-1, 1, 1)
             self.stride = m.stride
@@ -786,7 +786,7 @@ class Model_with_diffusion(Model):
             # print('Strides: %s' % m.stride.tolist())
         if isinstance(m, IAuxDetect):
             s = 256  # 2x min stride
-            m.stride = torch.tensor([s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, s, s))[:4]])  # forward
+            m.stride = torch.tensor([s / x.shape[-2] for x in self.forward_test(torch.zeros(1, ch, s, s))[:4]])  # forward
             #print(m.stride)
             check_anchor_order(m)
             m.anchors /= m.stride.view(-1, 1, 1)
@@ -795,7 +795,7 @@ class Model_with_diffusion(Model):
             # print('Strides: %s' % m.stride.tolist())
         if isinstance(m, IBin):
             s = 256  # 2x min stride
-            m.stride = torch.tensor([s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, s, s))])  # forward
+            m.stride = torch.tensor([s / x.shape[-2] for x in self.forward_test(torch.zeros(1, ch, s, s))])  # forward
             check_anchor_order(m)
             m.anchors /= m.stride.view(-1, 1, 1)
             self.stride = m.stride
@@ -803,7 +803,7 @@ class Model_with_diffusion(Model):
             # print('Strides: %s' % m.stride.tolist())
         if isinstance(m, IKeypoint):
             s = 256  # 2x min stride
-            m.stride = torch.tensor([s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, s, s))])  # forward
+            m.stride = torch.tensor([s / x.shape[-2] for x in self.forward_test(torch.zeros(1, ch, s, s))])  # forward
             check_anchor_order(m)
             m.anchors /= m.stride.view(-1, 1, 1)
             self.stride = m.stride
@@ -823,12 +823,34 @@ class Model_with_diffusion(Model):
             param.requires_grad=False
         for param in self.after_diffusion_model.parameters():
             param.requires_grad=False
+        for param in self.model.parameters():
+            param.requires_grad=False
             
     def subnetwork(self, model, start_layer_idx, end_layer_idx):
         subnetwork = nn.Sequential()
         for idx, layer in enumerate(list(model)[start_layer_idx: end_layer_idx+1]):
             subnetwork.add_module("layer_{}".format(idx), layer)
         return subnetwork
+    
+    def forward_test(self, x, augment=False, profile=False):
+        if augment:
+            img_size = x.shape[-2:]  # height, width
+            s = [1, 0.83, 0.67]  # scales
+            f = [None, 3, None]  # flips (2-ud, 3-lr)
+            y = []  # outputs
+            for si, fi in zip(s, f):
+                xi = scale_img(x.flip(fi) if fi else x, si, gs=int(self.stride.max()))
+                yi = self.forward_once(xi)[0]  # forward
+                # cv2.imwrite(f'img_{si}.jpg', 255 * xi[0].cpu().numpy().transpose((1, 2, 0))[:, :, ::-1])  # save
+                yi[..., :4] /= si  # de-scale
+                if fi == 2:
+                    yi[..., 1] = img_size[0] - yi[..., 1]  # de-flip ud
+                elif fi == 3:
+                    yi[..., 0] = img_size[1] - yi[..., 0]  # de-flip lr
+                y.append(yi)
+            return torch.cat(y, 1), None  # augmented inference, train
+        else:
+            return self.forward_once(x, profile)  # single-scale inference, train
     
     def forward_submodel(self, x, submodel, init_y=None, output_y=False, profile=False):
         y, dt = [], []  # outputs
@@ -872,7 +894,61 @@ class Model_with_diffusion(Model):
             return x,y
         else:
             return x
+    '''    
+    def forward(self, x, mode, init_y=None, output_y=False, profile=False):
+        # mode = ['before','after','all']
+        y, dt = [], []  # outputs
 
+        if init_y is not None:
+            for _, before_y in enumerate(init_y):
+                y.append(before_y)
+                dt.append(0)
+            y[-1]=x
+            
+        if mode == 'before':
+            submodel = self.before_diffusion_model
+        elif mode == 'after':
+            submodel = self.after_diffusion_model
+        elif mode == 'all':
+            submodel = self.model
+        else:
+            print('need mode in before, after, all')
+            dsa
+            
+        for m in submodel:
+            #print(m.i)
+            if m.f != -1:  # if not from previous layer
+                x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
+
+            if not hasattr(self, 'traced'):
+                self.traced=False
+
+            if self.traced:
+                if isinstance(m, Detect) or isinstance(m, IDetect) or isinstance(m, IAuxDetect) or isinstance(m, IKeypoint):
+                    break
+
+            if profile:
+                c = isinstance(m, (Detect, IDetect, IAuxDetect, IBin))
+                o = thop.profile(m, inputs=(x.copy() if c else x,), verbose=False)[0] / 1E9 * 2 if thop else 0  # FLOPS
+                for _ in range(10):
+                    m(x.copy() if c else x)
+                t = time_synchronized()
+                for _ in range(10):
+                    m(x.copy() if c else x)
+                dt.append((time_synchronized() - t) * 100)
+                print('%10.1f%10.0f%10.1fms %-40s' % (o, m.np, dt[-1], m.type))
+
+            x = m(x)  # run
+
+            y.append(x if m.i in self.save else None)  # save output
+
+        if profile:
+            print('%.1fms total' % sum(dt))
+        if output_y:
+            return x,y
+        else:
+            return x
+    '''
 
 
 

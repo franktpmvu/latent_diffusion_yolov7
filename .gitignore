@@ -13,3 +13,5 @@
 *.gz
 *.txt
 *.ipynb
+*.mat
+wandb/
