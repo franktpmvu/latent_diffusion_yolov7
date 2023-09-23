@@ -187,6 +187,48 @@ class ConvNextBlock(nn.Module):
 
         h = self.net(h)
         return h + self.res_conv(x)
+    
+class ConvNextBlock_2timeEmb(nn.Module):
+    """ https://arxiv.org/abs/2201.03545 """
+
+    def __init__(self, dim, dim_out, *, time_emb_dim = None, mult = 2, norm = True):
+        super().__init__()
+        self.mlp = nn.Sequential(
+            nn.GELU(),
+            nn.Linear(time_emb_dim, dim)
+        ) if exists(time_emb_dim) else None
+        self.mlp2 = nn.Sequential(
+            nn.GELU(),
+            nn.Linear(time_emb_dim, dim)
+        ) if exists(time_emb_dim) else None
+
+
+        self.ds_conv = nn.Conv2d(dim, dim, 7, padding = 3, groups = dim)
+
+        self.net = nn.Sequential(
+            LayerNorm(dim) if norm else nn.Identity(),
+            nn.Conv2d(dim, dim_out * mult, 3, padding = 1),
+            nn.GELU(),
+            nn.Conv2d(dim_out * mult, dim_out, 3, padding = 1)
+        )
+
+        self.res_conv = nn.Conv2d(dim, dim_out, 1) if dim != dim_out else nn.Identity()
+
+    def forward(self, x, time_emb = None, time_emb2 = None):
+        h = self.ds_conv(x)
+
+        if exists(self.mlp):
+            assert exists(time_emb), 'time emb must be passed in'
+            condition = self.mlp(time_emb)
+            h = h + rearrange(condition, 'b c -> b c 1 1')
+            
+        if exists(self.mlp2):
+            assert exists(time_emb2), 'time emb must be passed in'
+            condition2 = self.mlp2(time_emb2)
+            h = h + rearrange(condition2, 'b c -> b c 1 1')
+
+        h = self.net(h)
+        return h + self.res_conv(x)
 
 class LinearAttention(nn.Module):
     def __init__(self, dim, heads = 4, dim_head = 32):
@@ -304,6 +346,108 @@ class Unet(nn.Module):
             return self.final_conv(x) + orig_x
 
         return self.final_conv(x)
+    
+    
+class Unet_2timeEmb(nn.Module):
+    def __init__(
+        self,
+        dim,
+        out_dim = None,
+        dim_mults=(1, 2, 4, 8),
+        channels = 3,
+        with_time_emb = True,
+        residual = False
+    ):
+        super().__init__()
+        self.channels = channels
+        self.residual = residual
+        print("Is Time embed used ? ", with_time_emb)
+
+        dims = [channels, *map(lambda m: dim * m, dim_mults)]
+        in_out = list(zip(dims[:-1], dims[1:]))
+
+        if with_time_emb:
+            time_dim = dim
+            self.time_mlp = nn.Sequential(
+                SinusoidalPosEmb(dim),
+                nn.Linear(dim, dim * 4),
+                nn.GELU(),
+                nn.Linear(dim * 4, dim)
+            )
+            self.time_mlp2 = nn.Sequential(
+                SinusoidalPosEmb(dim),
+                nn.Linear(dim, dim * 4),
+                nn.GELU(),
+                nn.Linear(dim * 4, dim)
+            )
+        else:
+            time_dim = None
+            self.time_mlp = None
+
+        self.downs = nn.ModuleList([])
+        self.ups = nn.ModuleList([])
+        num_resolutions = len(in_out)
+
+        for ind, (dim_in, dim_out) in enumerate(in_out):
+            is_last = ind >= (num_resolutions - 1)
+
+            self.downs.append(nn.ModuleList([
+                ConvNextBlock_2timeEmb(dim_in, dim_out, time_emb_dim = time_dim, norm = ind != 0),
+                ConvNextBlock_2timeEmb(dim_out, dim_out, time_emb_dim = time_dim),
+                Residual(PreNorm(dim_out, LinearAttention(dim_out))),
+                Downsample(dim_out) if not is_last else nn.Identity()
+            ]))
+
+        mid_dim = dims[-1]
+        self.mid_block1 = ConvNextBlock_2timeEmb(mid_dim, mid_dim, time_emb_dim = time_dim)
+        self.mid_attn = Residual(PreNorm(mid_dim, LinearAttention(mid_dim)))
+        self.mid_block2 = ConvNextBlock_2timeEmb(mid_dim, mid_dim, time_emb_dim = time_dim)
+
+        for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
+            is_last = ind >= (num_resolutions - 1)
+
+            self.ups.append(nn.ModuleList([
+                ConvNextBlock_2timeEmb(dim_out * 2, dim_in, time_emb_dim = time_dim),
+                ConvNextBlock_2timeEmb(dim_in, dim_in, time_emb_dim = time_dim),
+                Residual(PreNorm(dim_in, LinearAttention(dim_in))),
+                Upsample(dim_in) if not is_last else nn.Identity()
+            ]))
+
+        out_dim = default(out_dim, channels)
+        self.final_conv = nn.Sequential(
+            ConvNextBlock(dim, dim),
+            nn.Conv2d(dim, out_dim, 1)
+        )
+
+    def forward(self, x, time_t, time_g):
+        orig_x = x
+        t = self.time_mlp(time_t) if exists(self.time_mlp) else None
+        g = self.time_mlp2(time_g) if exists(self.time_mlp2) else None
+
+        h = []
+
+        for convnext, convnext2, attn, downsample in self.downs:
+            x = convnext(x, t, g)
+            x = convnext2(x, t, g)
+            x = attn(x)
+            h.append(x)
+            x = downsample(x)
+
+        x = self.mid_block1(x, t, g)
+        x = self.mid_attn(x)
+        x = self.mid_block2(x, t, g)
+
+        for convnext, convnext2, attn, upsample in self.ups:
+            x = torch.cat((x, h.pop()), dim=1)
+            x = convnext(x, t, g)
+            x = convnext2(x, t, g)
+            x = attn(x)
+            x = upsample(x)
+        if self.residual:
+            return self.final_conv(x) + orig_x
+
+        return self.final_conv(x)
+
 
 # gaussian diffusion trainer class
 
@@ -317,17 +461,17 @@ def extract(a, t, x_shape):
 #    noise = lambda: torch.randn(shape, device=device)
 #    return repeat_noise() if repeat else noise()
 
-#def cosine_beta_schedule(timesteps, s = 0.008):
+def cosine_beta_schedule(timesteps, s = 0.008):
     """
     cosine schedule
     as proposed in https://openreview.net/forum?id=-NEXDKk8gZ
     """
-#    steps = timesteps + 1
-#    x = np.linspace(0, steps, steps)
-#    alphas_cumprod = np.cos(((x / steps) + s) / (1 + s) * np.pi * 0.5) ** 2
-#    alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
-#    betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
-#    return np.clip(betas, a_min = 0, a_max = 0.999)
+    steps = timesteps + 1
+    x = torch.linspace(0, steps, steps)
+    alphas_cumprod = torch.cos(((x / steps) + s) / (1 + s) * math.pi * 0.5) ** 2
+    alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
+    betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
+    return torch.clip(betas, 0, 0.999)
 
 import torch
 import torchvision
@@ -356,6 +500,14 @@ class GaussianDiffusion(nn.Module):
 
         self.num_timesteps = int(timesteps)
         self.loss_type = loss_type
+        betas = cosine_beta_schedule(timesteps)
+        alphas = 1. - betas
+        alphas_cumprod = torch.cumprod(alphas, axis=0)
+        self.register_buffer('alphas_cumprod', alphas_cumprod)
+        self.register_buffer('sqrt_alphas_cumprod', torch.sqrt(alphas_cumprod))
+        self.register_buffer('sqrt_one_minus_alphas_cumprod', torch.sqrt(1. - alphas_cumprod))
+
+
         #self.resolution_routine = resolution_routine
         self.aug_routine = aug_routine
 
@@ -547,6 +699,33 @@ class GaussianDiffusion(nn.Module):
         #print(x_latent.shape)
         #print(step.shape)
         x_recon = self.denoise_fn(x_latent, step)
+        
+        y[-1]=x_recon
+        x_recon_yolo = self.yolomodel.module.forward_submodel(x_recon,self.yolomodel.module.after_diffusion_model,init_y=y)
+        #x_recon_yolo = self.yolomodel(x_recon,mode='after',init_y=y)
+        x_recon_yolo = non_max_suppression(x_recon_yolo[0], labels=[], multi_label=True)
+
+        return x_recon_yolo
+    
+    def forward_yolo_2noise(self, batch_size = 16, img=None, t=None, g=None):
+        
+        x_latent,y = self.yolomodel.module.forward_submodel(img,self.yolomodel.module.before_diffusion_model,output_y=True)
+        #x_latent,y = self.yolomodel(img,mode='before',output_y=True)
+
+        if t==None:
+            t=self.num_timesteps
+            step_t = torch.full((batch_size,), t - 1, dtype=torch.long).cuda()
+        else:
+            step_t = t
+            
+        if g==None:
+            g=self.num_timesteps
+            step_g = torch.full((batch_size,), g - 1, dtype=torch.long).cuda()
+        else:
+            step_g = g
+        #print(x_latent.shape)
+        #print(step.shape)
+        x_recon = self.denoise_fn(x_latent, step_t, step_g)
         
         y[-1]=x_recon
         x_recon_yolo = self.yolomodel.module.forward_submodel(x_recon,self.yolomodel.module.after_diffusion_model,init_y=y)
@@ -781,34 +960,84 @@ class GaussianDiffusion(nn.Module):
 
         return choose_blur
     
+    
+    def q_sample_gaussian(self, x_start, x_end, t):
+        # simply use the alphas to interpolate
+        return (
+                extract(self.sqrt_alphas_cumprod, t, x_start.shape) * x_start +
+                extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * x_end
+        )
+
+    
     def p_losses_pair(self, x_start, x_blur, t):
         b, c, h, w = x_start.shape
-
+        
+        
         x_start_latent,y_start = self.yolomodel.module.forward_submodel(x_start,self.yolomodel.module.before_diffusion_model,output_y=True)
         x_blur_latent,y = self.yolomodel.module.forward_submodel(x_blur,self.yolomodel.module.before_diffusion_model,output_y=True)
-        #print(self.yolomodel.device)
-        #print(x_start.device)
-        #x_start_latent,y_start = self.yolomodel(x_start,mode='before',output_y=True)
-        #x_blur_latent,y = self.yolomodel(x_blur,mode='before',output_y=True)
+        
+        gaussian_latent= torch.randn_like(x_start_latent).to(t.device) #need chage to latent space
+        #print('torch.var_mean(x_start)',torch.var_mean(x_start_latent))
+        #print('torch.var_mean(x_blur)',torch.var_mean(x_blur_latent))
+        #print('torch.var_mean(gaussian_latent)',torch.var_mean(gaussian_latent))
 
-        x_recon = self.denoise_fn(x_blur_latent, t)
+        g_step = torch.randint(0, self.num_timesteps, (b,), device=t.device).long()
+        zero_step = torch.zeros((b,)).to(t.device)
+       
+        
+        x0_mix_gaussian = self.q_sample_gaussian(x_start=x_start_latent, x_end=gaussian_latent, t=g_step)
+        
+        xtg_latent = self.q_sample_gaussian(x_start=x_blur_latent, x_end=gaussian_latent, t=g_step)
+        
+        
+        x_recon_g = self.denoise_fn(x0_mix_gaussian, zero_step,g_step)
+        x_recon_t = self.denoise_fn(x_blur_latent, t,zero_step)
+        x_recon_tg = self.denoise_fn(xtg_latent, t,g_step)
+
+        
+        
+        
+        
+        
 
         if self.loss_type == 'l1':
-            loss = (x_start_latent - x_recon).abs().mean()
+            loss = (x_start_latent - x_recon_g).abs().mean() + (x_start_latent - x_recon_t).abs().mean() + (x_start_latent - x_recon_tg).abs().mean()
             
         elif self.loss_type == 'l1_with_last_layer':
+            loss_latent = 0
+            loss_latent += (x_start_latent - x_recon_g).abs().mean()
+            loss_latent += (x_start_latent - x_recon_t).abs().mean() 
+            loss_latent += (x_start_latent - x_recon_tg).abs().mean()
+
+            
+            
+            # noise from raining etc
             x_start_yolo = self.yolomodel.module.forward_submodel(x_start_latent,self.yolomodel.module.after_diffusion_model,init_y=y_start)
-            #x_start_yolo = self.yolomodel(x_start_latent,mode='after',init_y=y_start)
-            
-            y[-1]=x_recon
-            x_recon_yolo = self.yolomodel.module.forward_submodel(x_recon,self.yolomodel.module.after_diffusion_model,init_y=y)
-            #x_recon_yolo = self.yolomodel(x_recon,mode='after',init_y=y)
-            loss_latent = (x_start_latent - x_recon).abs().mean()
-            
             x_start_yolo_1d = self.change_yolo_detect_to_1d(x_start_yolo,b)
-            x_recon_yolo_1d = self.change_yolo_detect_to_1d(x_recon_yolo,b)
-            loss_last_yolo = (x_start_yolo_1d - x_recon_yolo_1d).abs().mean()
+            
+            y[-1]=x_recon_t
+            x_recon_t_yolo = self.yolomodel.module.forward_submodel(x_recon_t,self.yolomodel.module.after_diffusion_model,init_y=y)
+            x_recon_t_yolo_1d = self.change_yolo_detect_to_1d(x_recon_t_yolo,b)
+
+            y[-1]=x_recon_g
+            x_recon_g_yolo = self.yolomodel.module.forward_submodel(x_recon_g,self.yolomodel.module.after_diffusion_model,init_y=y)
+            x_recon_g_yolo_1d = self.change_yolo_detect_to_1d(x_recon_g_yolo,b)
+
+            
+            y[-1]=x_recon_tg
+            x_recon_tg_yolo = self.yolomodel.module.forward_submodel(x_recon_tg,self.yolomodel.module.after_diffusion_model,init_y=y)
+            x_recon_tg_yolo_1d = self.change_yolo_detect_to_1d(x_recon_tg_yolo,b)
+
+            
+            loss_last_yolo =0
+            loss_last_yolo += (x_start_yolo_1d - x_recon_t_yolo_1d).abs().mean() 
+            loss_last_yolo += (x_start_yolo_1d - x_recon_g_yolo_1d).abs().mean() 
+            loss_last_yolo += (x_start_yolo_1d - x_recon_tg_yolo_1d).abs().mean() 
+            
             #print('loss_latent = %.05f, loss_last_yolo = %.05f'%(loss_latent,loss_last_yolo))
+            
+
+            
             loss = loss_latent+loss_last_yolo
             
         elif self.loss_type == 'l2':
@@ -1103,7 +1332,7 @@ class Trainer(object):
         step_start_ema = 2000,
         update_ema_every = 10,
         save_and_sample_every = 1000,
-        #save_and_sample_every = 10,
+        #save_and_sample_every = 1,
         results_folder = './results',
         load_path = None,
         dataset = None,
@@ -1167,8 +1396,9 @@ class Trainer(object):
             else:
                 self.load_nonstrict(load_path)
         if not test_mode:
+            
             wandb.init(
-                project="diffusion_latent_512",
+                project="diffusion_latent_512_2noise",
                 config={
                 'ema_decay':ema_decay,
                 'image_size':image_size,
@@ -1189,7 +1419,8 @@ class Trainer(object):
                 'eval_data_label_folder':eval_data_label_folder
                 }
 
-        )
+            )
+            
         # early stopping
         self.patience=7
         self.verbose=False
@@ -1198,6 +1429,7 @@ class Trainer(object):
         self.bestScore=None
         self.earlyStop=False
         self.valLossMin=np.Inf
+        self.best_licence_detect_gt=0
 
 
     def earlyStopping(self, val_loss):
@@ -1247,8 +1479,6 @@ class Trainer(object):
         print("Step : ", str(data['step']))
         if 'best_licence_detect_gt' in data.keys():
             self.best_licence_detect_gt=data['best_licence_detect_gt']
-        else:
-            self.best_licence_detect_gt=0
 
         #print(data['step'])
         #print(data['model'])
@@ -1263,8 +1493,7 @@ class Trainer(object):
         print("Step : ", str(data['step']))
         if 'best_licence_detect_gt' in data.keys():
             self.best_licence_detect_gt=data['best_licence_detect_gt']
-        else:
-            self.best_licence_detect_gt=0
+            
 
         #print(data['step'])
         #print(data['model'])
@@ -1353,7 +1582,7 @@ class Trainer(object):
                 if self.step % (self.save_and_sample_every * 100) == 0:
                     self.save(self.step)
                     
-                if self.step % (self.save_and_sample_every * 10) == 0 and self.eval is not None:
+                if self.step % (self.save_and_sample_every * 10) == 0 and self.eval is not None and self.step >= self.save_and_sample_every * 50:
                     #acc_val_loss=0
                     eval_len=self.evalDs.__len__()
                     
@@ -1373,7 +1602,7 @@ class Trainer(object):
 
                             #print(data_blur.shape)
                             #print(bname)
-                            yolo_output = self.ema_model.module.forward_yolo(img=data_blur, t=step, batch_size=data_blur.shape[0])
+                            yolo_output = self.ema_model.module.forward_yolo_2noise(img=data_blur, batch_size=data_blur.shape[0])
                             
                             for index_yolooutput , _yolo_output in enumerate(yolo_output):
                                 if _yolo_output is not None:
