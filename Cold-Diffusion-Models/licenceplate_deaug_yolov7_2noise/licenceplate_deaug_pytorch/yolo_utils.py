@@ -66,6 +66,7 @@ def resize(img, size):
     else:
         meta = {}
         return img, meta
+    
 def getMetaFromHWC(h, w, c, size):
     if not (h == size and w == size):
         scale_x = float(size / w)
@@ -634,17 +635,17 @@ def eval_dataset(results,label_data):
         print("Precision = {:.4f}".format(precision))
         classes = _classes()
 
-            for k, v in label_data.items():
-                gt_strs = [s.split(',')[-1] for s in v]
-                if k in correct_plate:
-                    objs = correct_plate[k]
-                    for obj in objs: # obj = [{'plate': int[x1, y1, x2, y2], 'char':[int[x1, y1, x2, y2, label], ...], 'idx': int(i)}]
-                        pred_str = [classes[x[-1]] for x in obj['char']]
-                        wer, sid, t = get_wer(list(gt_strs[obj['idx']]), pred_str)
-                        n_sid += sid
-                        n_detected += t
-                        if wer == 0:
-                            n_perfect += 1
+        for k, v in label_data.items():
+            gt_strs = [s.split(',')[-1] for s in v]
+            if k in correct_plate:
+                objs = correct_plate[k]
+                for obj in objs: # obj = [{'plate': int[x1, y1, x2, y2], 'char':[int[x1, y1, x2, y2, label], ...], 'idx': int(i)}]
+                    pred_str = [classes[x[-1]] for x in obj['char']]
+                    wer, sid, t = get_wer(list(gt_strs[obj['idx']]), pred_str)
+                    n_sid += sid
+                    n_detected += t
+                    if wer == 0:
+                        n_perfect += 1
 
 
         print("Characters in Detected Plates = ", n_detected)

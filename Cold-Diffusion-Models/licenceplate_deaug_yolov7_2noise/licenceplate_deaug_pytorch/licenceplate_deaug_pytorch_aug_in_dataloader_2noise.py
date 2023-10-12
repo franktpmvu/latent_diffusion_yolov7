@@ -490,6 +490,8 @@ class GaussianDiffusion(nn.Module):
         aug_routine = 'Default',
         train_routine = 'Final',
         sampling_routine='default',
+        t_steps=1000,
+        g_steps=1000,
         yolomodel=None
     ):
         super().__init__()
@@ -499,6 +501,9 @@ class GaussianDiffusion(nn.Module):
         self.device_of_kernel = device_of_kernel
 
         self.num_timesteps = int(timesteps)
+        self.t_steps = int(t_steps)
+        self.g_steps = int(g_steps)
+        
         self.loss_type = loss_type
         betas = cosine_beta_schedule(timesteps)
         alphas = 1. - betas
@@ -981,7 +986,7 @@ class GaussianDiffusion(nn.Module):
         #print('torch.var_mean(x_blur)',torch.var_mean(x_blur_latent))
         #print('torch.var_mean(gaussian_latent)',torch.var_mean(gaussian_latent))
 
-        g_step = torch.randint(0, self.num_timesteps, (b,), device=t.device).long()
+        g_step = torch.randint(0, self.g_steps, (b,), device=t.device).long()
         zero_step = torch.zeros((b,)).to(t.device)
        
         
@@ -1265,8 +1270,12 @@ class Dataset_cv2_aug_step(data.Dataset):
         bname = self.bname[index]
         #print(path)
         img = cv2.imread(str(path))
-        img, meta = self.resize(img, self.image_size)
-        
+        if 'cityscapes' in str(path):
+            img = self.crop(img, self.image_size)
+            #print(img.shape)
+        else:
+            img, meta = self.resize(img, self.image_size)
+
         
         step = randint(0,99)
         img_blur = self.augmenter.mix_aug(copy.deepcopy(img), step*0.01, random=True)
@@ -1310,6 +1319,16 @@ class Dataset_cv2_aug_step(data.Dataset):
         else:
             meta = {}
             return img, meta
+    def crop(self, img, size):
+        h, w, c= img.shape
+        #print(img.shape)
+        low=0
+        highh=h-size
+        highw=w-size
+        y = np.random.randint(low=low,high=highh)
+        x = np.random.randint(low=low,high=highw)
+        #print('x= %d,y= %d, size= %d'%(x,y,size))
+        return img[y:y+size,x:x+size,:]
 
         
 # trainer class
@@ -1398,7 +1417,7 @@ class Trainer(object):
         if not test_mode:
             
             wandb.init(
-                project="diffusion_latent_512_2noise",
+                project="diffusion_latent_512_2noise_g01_cityscapes_res",
                 config={
                 'ema_decay':ema_decay,
                 'image_size':image_size,
@@ -1602,7 +1621,9 @@ class Trainer(object):
 
                             #print(data_blur.shape)
                             #print(bname)
-                            yolo_output = self.ema_model.module.forward_yolo_2noise(img=data_blur, batch_size=data_blur.shape[0])
+                            step_g = torch.full((data_blur.shape[0],), 0, dtype=torch.long).cuda()
+
+                            yolo_output = self.ema_model.module.forward_yolo_2noise(img=data_blur, batch_size=data_blur.shape[0],t=step,g=step_g)
                             
                             for index_yolooutput , _yolo_output in enumerate(yolo_output):
                                 if _yolo_output is not None:
@@ -1618,7 +1639,7 @@ class Trainer(object):
                         #acc_val_loss = acc_val_loss + (u_val_loss/eval_len)
                         #wandb.log({"acc_val_loss": acc_val_loss})
                         wandb.log(eval_dict)
-                        self.earlyStopping(licence_detect_gt)
+                        self.earlyStopping(-licence_detect_gt)
                         if licence_detect_gt>self.best_licence_detect_gt:
                             self.best_licence_detect_gt=licence_detect_gt
                             print('best_licence_detect_gt = %f'%self.best_licence_detect_gt)
