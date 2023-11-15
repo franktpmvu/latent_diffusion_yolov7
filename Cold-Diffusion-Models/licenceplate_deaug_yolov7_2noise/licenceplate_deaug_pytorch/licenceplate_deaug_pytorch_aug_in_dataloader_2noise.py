@@ -520,7 +520,10 @@ class GaussianDiffusion(nn.Module):
         self.func = self.get_funcs()
         self.train_routine = train_routine
         self.sampling_routine = sampling_routine
+        
+        #self.aug_licence = mix_augmentaion(noiseStepMode='exp')
         self.aug_licence = mix_augmentaion()
+        
         if yolomodel is None:
             print('this code need base yolo model to encode latent space, please check.')
             noyolomodel
@@ -656,7 +659,7 @@ class GaussianDiffusion(nn.Module):
     def sample_yolo(self, batch_size = 16, img=None, t=None):
         #print(img.shape)
         
-        x_start_latent = self.yolomodel.module.forward_submodel(img,self.yolomodel.module.before_diffusion_model)
+        x_start_latent = self.yolomodel.forward_submodel(img,self.yolomodel.before_diffusion_model)
         #x_start_latent = self.yolomodel(img,mode='before')
         #print(x_start_latent.shape)
 
@@ -674,7 +677,7 @@ class GaussianDiffusion(nn.Module):
         
         #print(xt.shape)
 
-        x_blur_latent = self.yolomodel.module.forward_submodel(xt,self.yolomodel.module.before_diffusion_model)
+        x_blur_latent = self.yolomodel.forward_submodel(xt,self.yolomodel.before_diffusion_model)
         #x_blur_latent = self.yolomodel(xt,mode='before')
         #print(x_blur_latent)
         #print(x_blur_latent.shape)
@@ -693,7 +696,7 @@ class GaussianDiffusion(nn.Module):
     @torch.no_grad()
     def forward_yolo(self, batch_size = 16, img=None, t=None):
         
-        x_latent,y = self.yolomodel.module.forward_submodel(img,self.yolomodel.module.before_diffusion_model,output_y=True)
+        x_latent,y = self.yolomodel.forward_submodel(img,self.yolomodel.before_diffusion_model,output_y=True)
         #x_latent,y = self.yolomodel(img,mode='before',output_y=True)
 
         if t==None:
@@ -706,15 +709,26 @@ class GaussianDiffusion(nn.Module):
         x_recon = self.denoise_fn(x_latent, step)
         
         y[-1]=x_recon
-        x_recon_yolo = self.yolomodel.module.forward_submodel(x_recon,self.yolomodel.module.after_diffusion_model,init_y=y)
+        x_recon_yolo = self.yolomodel.forward_submodel(x_recon,self.yolomodel.after_diffusion_model,init_y=y)
         #x_recon_yolo = self.yolomodel(x_recon,mode='after',init_y=y)
         x_recon_yolo = non_max_suppression(x_recon_yolo[0], labels=[], multi_label=True)
 
         return x_recon_yolo
     
+    def forward_yolo_wodiffusion(self, batch_size = 16, img=None):
+        
+        x_latent,y = self.yolomodel.forward_submodel(img,self.yolomodel.before_diffusion_model,output_y=True)
+        #x_latent,y = self.yolomodel(img,mode='before',output_y=True)
+
+        x_yolo = self.yolomodel.forward_submodel(x_latent,self.yolomodel.after_diffusion_model,init_y=y)
+        #x_recon_yolo = self.yolomodel(x_recon,mode='after',init_y=y)
+        x_recon_yolo = non_max_suppression(x_yolo[0], labels=[], multi_label=True)
+
+        return x_recon_yolo
+    
     def forward_yolo_2noise(self, batch_size = 16, img=None, t=None, g=None):
         
-        x_latent,y = self.yolomodel.module.forward_submodel(img,self.yolomodel.module.before_diffusion_model,output_y=True)
+        x_latent,y = self.yolomodel.forward_submodel(img,self.yolomodel.before_diffusion_model,output_y=True)
         #x_latent,y = self.yolomodel(img,mode='before',output_y=True)
 
         if t==None:
@@ -733,7 +747,7 @@ class GaussianDiffusion(nn.Module):
         x_recon = self.denoise_fn(x_latent, step_t, step_g)
         
         y[-1]=x_recon
-        x_recon_yolo = self.yolomodel.module.forward_submodel(x_recon,self.yolomodel.module.after_diffusion_model,init_y=y)
+        x_recon_yolo = self.yolomodel.forward_submodel(x_recon,self.yolomodel.after_diffusion_model,init_y=y)
         #x_recon_yolo = self.yolomodel(x_recon,mode='after',init_y=y)
         x_recon_yolo = non_max_suppression(x_recon_yolo[0], labels=[], multi_label=True)
 
@@ -978,8 +992,8 @@ class GaussianDiffusion(nn.Module):
         b, c, h, w = x_start.shape
         
         
-        x_start_latent,y_start = self.yolomodel.module.forward_submodel(x_start,self.yolomodel.module.before_diffusion_model,output_y=True)
-        x_blur_latent,y = self.yolomodel.module.forward_submodel(x_blur,self.yolomodel.module.before_diffusion_model,output_y=True)
+        x_start_latent,y_start = self.yolomodel.forward_submodel(x_start,self.yolomodel.before_diffusion_model,output_y=True)
+        x_blur_latent,y = self.yolomodel.forward_submodel(x_blur,self.yolomodel.before_diffusion_model,output_y=True)
         
         gaussian_latent= torch.randn_like(x_start_latent).to(t.device) #need chage to latent space
         #print('torch.var_mean(x_start)',torch.var_mean(x_start_latent))
@@ -1017,20 +1031,20 @@ class GaussianDiffusion(nn.Module):
             
             
             # noise from raining etc
-            x_start_yolo = self.yolomodel.module.forward_submodel(x_start_latent,self.yolomodel.module.after_diffusion_model,init_y=y_start)
+            x_start_yolo = self.yolomodel.forward_submodel(x_start_latent,self.yolomodel.after_diffusion_model,init_y=y_start)
             x_start_yolo_1d = self.change_yolo_detect_to_1d(x_start_yolo,b)
             
             y[-1]=x_recon_t
-            x_recon_t_yolo = self.yolomodel.module.forward_submodel(x_recon_t,self.yolomodel.module.after_diffusion_model,init_y=y)
+            x_recon_t_yolo = self.yolomodel.forward_submodel(x_recon_t,self.yolomodel.after_diffusion_model,init_y=y)
             x_recon_t_yolo_1d = self.change_yolo_detect_to_1d(x_recon_t_yolo,b)
 
             y[-1]=x_recon_g
-            x_recon_g_yolo = self.yolomodel.module.forward_submodel(x_recon_g,self.yolomodel.module.after_diffusion_model,init_y=y)
+            x_recon_g_yolo = self.yolomodel.forward_submodel(x_recon_g,self.yolomodel.after_diffusion_model,init_y=y)
             x_recon_g_yolo_1d = self.change_yolo_detect_to_1d(x_recon_g_yolo,b)
 
             
             y[-1]=x_recon_tg
-            x_recon_tg_yolo = self.yolomodel.module.forward_submodel(x_recon_tg,self.yolomodel.module.after_diffusion_model,init_y=y)
+            x_recon_tg_yolo = self.yolomodel.forward_submodel(x_recon_tg,self.yolomodel.after_diffusion_model,init_y=y)
             x_recon_tg_yolo_1d = self.change_yolo_detect_to_1d(x_recon_tg_yolo,b)
 
             
@@ -1069,8 +1083,8 @@ class GaussianDiffusion(nn.Module):
         if self.train_routine == 'Final':
             x_blur = self.q_sample(x_start=x_start, t=t)
             
-            x_start_latent = self.yolomodel.module.forward_submodel(x_start,self.yolomodel.module.before_diffusion_model)
-            x_blur_latent = self.yolomodel.module.forward_submodel(x_blur,self.yolomodel.module.before_diffusion_model)
+            x_start_latent = self.yolomodel.forward_submodel(x_start,self.yolomodel.before_diffusion_model)
+            x_blur_latent = self.yolomodel.forward_submodel(x_blur,self.yolomodel.before_diffusion_model)
             #x_start_latent = self.yolomodel(x_start,mode='before')
             #x_blur_latent = self.yolomodel(x_blur,mode='before')
             
@@ -1190,13 +1204,34 @@ class GaussianDiffusion(nn.Module):
 
         return loss
 
-    def forward(self, x, x_aug, t, *args, **kwargs):
+    #def forward(self, x, x_aug, t, *args, **kwargs):
+    #    #print(*x.shape, x.device, self.image_size)
+    #    b, c, h, w, device, img_size, = *x.shape, x.device, self.image_size
+    #    assert h//8 == img_size and w//8 == img_size, f'height and width of image must be {img_size}'
+    #    return self.p_losses_pair(x, x_aug, t, *args, **kwargs)
+    
+    def forward(self, x, x_aug, t, *args, mode='train', g=None, **kwargs):
         #print(*x.shape, x.device, self.image_size)
-        b, c, h, w, device, img_size, = *x.shape, x.device, self.image_size
-        assert h//8 == img_size and w//8 == img_size, f'height and width of image must be {img_size}'
-        return self.p_losses_pair(x, x_aug, t, *args, **kwargs)
+        
+        if mode =='train':
+            b, c, h, w, device, img_size, = *x.shape, x.device, self.image_size
+            assert h//8 == img_size and w//8 == img_size, f'height and width of image must be {img_size}'
+            return self.p_losses_pair(x, x_aug, t, *args, **kwargs)
+        elif mode=='w/diffusion':
+            if not g is None:
+                return self.forward_yolo_2noise(img=x,batch_size=x.shape[0],t=t,g=g)
+            else:
+                print('step g cannot be none')
+                dsa
+                return 0
 
-# dataset classes
+        elif mode=='wodiffusion':
+            return self.forward_yolo_wodiffusion(img=x, batch_size=x.shape[0])
+            
+        else:
+            print('forard mode not true')
+            dsa
+            return 0
 
     
     
@@ -1298,6 +1333,8 @@ class Dataset_cv2_aug_step(data.Dataset):
         img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x512x512
         img = np.ascontiguousarray(img)
         img = torch.from_numpy(img)
+        img = torch.clamp(img, min=0.0, max=1.0)
+
         return img
 
         
@@ -1344,6 +1381,8 @@ class Trainer(object):
         image_size = 128,
         train_batch_size = 32,
         eval_batch_size = 32,
+        eval_data_folder=None,
+        eval_data_label_folder=None,
         train_lr = 2e-5,
         train_num_steps = 100000,
         gradient_accumulate_every = 2,
@@ -1356,9 +1395,7 @@ class Trainer(object):
         load_path = None,
         dataset = None,
         shuffle=True,
-        test_mode=False,
-        eval_data_folder=None,
-        eval_data_label_folder=None
+        test_mode=False
     ):
         super().__init__()
         self.model = diffusion_model
@@ -1389,7 +1426,7 @@ class Trainer(object):
             
         self.ds = Dataset_cv2_aug_step(folder, self.aug_licence, image_size)
 
-        self.dl = cycle(data.DataLoader(self.ds, batch_size = eval_batch_size, shuffle=shuffle, pin_memory=True, num_workers=32,drop_last=True))
+        self.dl = cycle(data.DataLoader(self.ds, batch_size = train_batch_size, shuffle=shuffle, pin_memory=True, num_workers=32,drop_last=True))
         #self.opt = Adam(diffusion_model.parameters(), lr=train_lr)
         self.opt = Adam(filter(lambda p:p.requires_grad, diffusion_model.parameters()), lr=train_lr)
         #torch.autograd.set_detect_anomaly(True)
@@ -1417,12 +1454,14 @@ class Trainer(object):
         if not test_mode:
             
             wandb.init(
-                project="diffusion_latent_512_2noise_g01_cityscapes_res",
+                project="diffusion_latent_512_2noise_t01_g02_cityscapes_res",
                 config={
                 'ema_decay':ema_decay,
                 'image_size':image_size,
                 'train_batch_size':train_batch_size,
                 'eval_batch_size':eval_batch_size,
+                'eval_data_folder':eval_data_folder,
+                'eval_data_label_folder':eval_data_label_folder,
                 'train_lr':train_lr,
                 'train_num_steps':train_num_steps,
                 'gradient_accumulate_every':gradient_accumulate_every,
@@ -1433,9 +1472,8 @@ class Trainer(object):
                 'results_folder':results_folder,
                 'load_path':load_path,
                 'dataset':dataset,
-                'shuffle':shuffle,
-                'eval_data_folder':eval_data_folder,
-                'eval_data_label_folder':eval_data_label_folder
+                'noiseStepMode':'default',
+                'shuffle':shuffle
                 }
 
             )
@@ -1607,6 +1645,8 @@ class Trainer(object):
                     
                     with torch.no_grad():
                         yolo_results = {}
+                        yolo_results_wodifussion = {}
+                        yolo_results_clean = {}
                         for iEval, dataEval in enumerate(self.evalDl):
                             #u_val_loss = 0
 
@@ -1624,6 +1664,12 @@ class Trainer(object):
                             step_g = torch.full((data_blur.shape[0],), 0, dtype=torch.long).cuda()
 
                             yolo_output = self.ema_model.module.forward_yolo_2noise(img=data_blur, batch_size=data_blur.shape[0],t=step,g=step_g)
+                            yolo_output_wodifussion = self.ema_model.module.forward_yolo_wodiffusion(img=data_blur, batch_size=data_blur.shape[0])
+                            yolo_output_clean = self.ema_model.module.forward_yolo_wodiffusion(img=data_clean, batch_size=data_clean.shape[0])
+                            #yolo_output = self.ema_model(data_blur, data_blur, step, mode='w/diffusion', g=step_g)
+                            #yolo_output_wodifussion = self.ema_model(data_blur, data_blur, step, mode='wodiffusion')
+                            #yolo_output_clean = self.ema_model(data_clean, data_clean, step, mode='wodiffusion')
+                            
                             
                             for index_yolooutput , _yolo_output in enumerate(yolo_output):
                                 if _yolo_output is not None:
@@ -1633,12 +1679,36 @@ class Trainer(object):
                                         
                                     output = affine_transform(_yolo_output, sub_meta)
                                     yolo_results[bname[index_yolooutput]] = output
+                                    
+                            for index_yolooutput , _yolo_output in enumerate(yolo_output_wodifussion):
+                                if _yolo_output is not None:
+                                    sub_meta = {}
+                                    for metakey in meta.keys():
+                                        sub_meta[metakey] = meta[metakey][index_yolooutput]
+                                        
+                                    output = affine_transform(_yolo_output, sub_meta)
+                                    yolo_results_wodifussion[bname[index_yolooutput]] = output
+
+                                    
+                            for index_yolooutput , _yolo_output in enumerate(yolo_output_clean):
+                                if _yolo_output is not None:
+                                    sub_meta = {}
+                                    for metakey in meta.keys():
+                                        sub_meta[metakey] = meta[metakey][index_yolooutput]
+                                        
+                                    output = affine_transform(_yolo_output, sub_meta)
+                                    yolo_results_clean[bname[index_yolooutput]] = output
+
                         eval_dict = eval_dataset(yolo_results, self.evalDs.label_data)
+                        eval_dict_wodifussion = eval_dataset(yolo_results_wodifussion, self.evalDs.label_data,flag='_wodiffusion')
+                        eval_dict_clean = eval_dataset(yolo_results_clean, self.evalDs.label_data,flag='_clean')
                         licence_detect_gt = eval_dict['plate_detect_gt']
                         
                         #acc_val_loss = acc_val_loss + (u_val_loss/eval_len)
                         #wandb.log({"acc_val_loss": acc_val_loss})
                         wandb.log(eval_dict)
+                        wandb.log(eval_dict_wodifussion)
+                        wandb.log(eval_dict_clean)
                         self.earlyStopping(-licence_detect_gt)
                         if licence_detect_gt>self.best_licence_detect_gt:
                             self.best_licence_detect_gt=licence_detect_gt

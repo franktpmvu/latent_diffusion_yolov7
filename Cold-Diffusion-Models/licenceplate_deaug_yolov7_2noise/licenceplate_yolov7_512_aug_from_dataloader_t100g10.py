@@ -53,7 +53,7 @@ yolomodel = Model_with_diffusion(args.yolocfg, ch=3, nc=args.yoloclass, anchors=
 yolomodel.load_state_dict(torch.load(args.yolomodel))
 yolomodel.eval()
 yolomodel.create_subnetwork()
-yolomodel = torch.nn.DataParallel(yolomodel, device_ids=range(torch.cuda.device_count()))
+#yolomodel = torch.nn.DataParallel(yolomodel, device_ids=range(torch.cuda.device_count()))
 
 #yolomodel = torch.nn.DataParallel(yolomodel, device_ids=range(torch.cuda.device_count()))
 
@@ -109,7 +109,7 @@ trainer = Trainer(
     diffusion,
     datasets,
     image_size = 512,
-    train_batch_size = 16,
+    train_batch_size = 32,
     eval_batch_size = 32,
     train_lr = 2e-5,
     train_num_steps = args.train_steps, # total training steps

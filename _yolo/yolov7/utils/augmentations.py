@@ -6,11 +6,17 @@ import copy
 from scipy.stats import norm
 from matplotlib import pyplot as plt
 import torch
+import math
 
 class mix_augmentaion(object):
-    def __init__(self,imshape=[256,256]):
+    def __init__(self,imshape=(256,256),noiseStepMode='direct'):
         self.imshape=imshape
+        self.noiseStepMode=noiseStepMode
+        if noiseStepMode=='exp':
+            self.multi_base=0.0001
+            self.exp_base=self.compute_pow(self.multi_base,1,99)
         self.random_parameter()
+        
     def random_parameter(self,h=None,w=None,rain_slant=None,spotlignt_position=None,spotlight_reverse=None,spotlight_transparency=None,gamma=None,pixelate_blocks=None):
         #rain
         if rain_slant is None:
@@ -105,6 +111,7 @@ class mix_augmentaion(object):
         if not imshape==self.imshape:
             self.rain_drops, self.rain_width = self.generate_random_lines(self.imshape, slant)
             print('self.imshape = %s, imshape = %s.'%(str(self.imshape),str(imshape)))
+            
 
         
         rain_drops = self.rain_drops
@@ -303,7 +310,7 @@ class mix_augmentaion(object):
         else:
             return input_image_copy
         
-    def pixelate_cv2(self,image, blocks=None,step_ratio=1.0):
+    def deresolution(self,image, blocks=None,step_ratio=1.0):
         input_image_copy=copy.deepcopy(image)
         # divide the input image into NxN blocks
         if step_ratio==0:
@@ -332,6 +339,8 @@ class mix_augmentaion(object):
         # step= 0~1
         if random:
             self.random_parameter()
+        if self.noiseStepMode=='exp':
+            step = self.multi_base*math.pow(self.exp_base, step*100)
         #print(np.max(img))
         #print(np.min(img))
         img = img.astype(np.uint8)
@@ -345,7 +354,7 @@ class mix_augmentaion(object):
         img = self.adjust_gamma(img,gamma=1-(1-self.gamma)*step)
         #img = self.pixelate(img,blocks=self.pixelate_blocks,step_ratio=step)
 
-        img = self.pixelate_cv2(img,blocks=self.pixelate_blocks,step_ratio=step)
+        img = self.deresolution(img,blocks=self.pixelate_blocks,step_ratio=step)
 
         #img = self.pixelate_cv2(img,blocks=self.pixelate_blocks,step_ratio=step)
 
@@ -371,7 +380,7 @@ class mix_augmentaion(object):
 
 
     
-    def batch_data_add_licence_aug(self,imgbf,t,random=False):
+    def batch_data_add_licence_aug(self,imgbf,t,random=False,clamp=False):
         
         after_img = torch.full(imgbf.shape,0,dtype=imgbf.dtype,device=imgbf.device)
         for idx, oneimg in enumerate(imgbf):
@@ -386,7 +395,10 @@ class mix_augmentaion(object):
 
 
             img_inv = self.npy2torchcuda_cv2(img_aug/255,imgbf.device)
-            if torch.max(img_inv)>1:
+            if clamp:
+                img_inv = torch.clamp(img_inv, min=0.0, max=1.0)
+                
+            if torch.max(img_inv)>1 or torch.min(img_inv)<0:
                 print('img_aug_max = '+str(np.max(img_aug)))
                 print('img_aug_min = '+str(np.min(img_aug)))
                 print('img_inv = '+str(torch.max(img_inv)))
@@ -397,4 +409,10 @@ class mix_augmentaion(object):
 
             after_img[idx] = img_inv
         return after_img
+    
+    def compute_pow(self, start, end, n):
+        #  C = e^((ln(end) - ln(start)) / n)
+        C = math.exp((math.log(end) - math.log(start)) / n)
+        return C
+
 

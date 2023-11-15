@@ -598,7 +598,7 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
 
     return output
 
-def eval_dataset(results,label_data):
+def eval_dataset(results,label_data,flag=''):
     correct_plate = {}
     total_p, correct_p, pred_p = 0, 0, 0
     for k, v in label_data.items():
@@ -618,54 +618,68 @@ def eval_dataset(results,label_data):
                 correct_plate[k] = correct_r
                 correct_p += num
                 
-    print("Number of Correctly Detected Plates =", correct_p)
-    print("Number of Detected Plates =", pred_p)
-    print("Number of All Plates =", total_p)
-    recall=correct_p/total_p
-    print("Recall = {:.4f}".format(recall))
-    precision=correct_p/pred_p
-    print("Precision = {:.4f}".format(precision))
-    classes = _classes()
-
     n_perfect = 0  ### number of perfectly recognized plates
     n_sid = 0  ### number of failed recognized chars in detected
     n_detected = 0  ### number of chars in detected plates
 
-    for k, v in label_data.items():
-        gt_strs = [s.split(',')[-1] for s in v]
-        if k in correct_plate:
-            objs = correct_plate[k]
-            for obj in objs: # obj = [{'plate': int[x1, y1, x2, y2], 'char':[int[x1, y1, x2, y2, label], ...], 'idx': int(i)}]
-                pred_str = [classes[x[-1]] for x in obj['char']]
-                wer, sid, t = get_wer(list(gt_strs[obj['idx']]), pred_str)
-                n_sid += sid
-                n_detected += t
-                if wer == 0:
-                    n_perfect += 1
+    if not pred_p ==0:
+
+                
+        print("Number of Correctly Detected Plates =", correct_p)
+        print("Number of Detected Plates =", pred_p)
+        print("Number of All Plates =", total_p)
+        recall=correct_p/total_p
+        print("Recall = {:.4f}".format(recall))
+        precision=correct_p/pred_p
+        print("Precision = {:.4f}".format(precision))
+        classes = _classes()
+
+        for k, v in label_data.items():
+            gt_strs = [s.split(',')[-1] for s in v]
+            if k in correct_plate:
+                objs = correct_plate[k]
+                for obj in objs: # obj = [{'plate': int[x1, y1, x2, y2], 'char':[int[x1, y1, x2, y2, label], ...], 'idx': int(i)}]
+                    pred_str = [classes[x[-1]] for x in obj['char']]
+                    wer, sid, t = get_wer(list(gt_strs[obj['idx']]), pred_str)
+                    n_sid += sid
+                    n_detected += t
+                    if wer == 0:
+                        n_perfect += 1
 
 
-    print("Characters in Detected Plates = ", n_detected)
-    print("Error Characters (Detected) =", n_sid)
-    WER=n_sid/n_detected
-    print("World Error Rate (Detected) = {:.4f}".format(WER))
+        print("Characters in Detected Plates = ", n_detected)
+        print("Error Characters (Detected) =", n_sid)
+        WER_det=n_sid/n_detected
+        WER_gt=n_sid/n_perfect
+        print("World Error Rate (Detected) = {:.4f}".format(WER_det))
+        print("World Error Rate (Ground Truth) = {:.4f}".format(WER_gt))
 
-    print("\nNumber of Perfectly Recognized Plates = ", n_perfect)
-    plate_detect_det = n_perfect/correct_p
-    print("Accuracy(Detected) = {:.4f}".format(plate_detect_det))
-    plate_detect_gt = n_perfect/total_p
-    print("Accuracy(Groundtruth) = {:.4f}".format(plate_detect_gt))
+        print("\nNumber of Perfectly Recognized Plates = ", n_perfect)
+        if not correct_p ==0:
+            plate_detect_det = n_perfect/correct_p
+        else:
+            plate_detect_det=0
+        print("Accuracy(Detected) = {:.4f}".format(plate_detect_det))
+        plate_detect_gt = n_perfect/total_p
+        print("Accuracy(Groundtruth) = {:.4f}".format(plate_detect_gt))
+    else:
+        plate_detect_det=0
+        plate_detect_gt=0
+        recall=0
+        precision=0
     accuracy_dict={
-        'plate_detect_gt':plate_detect_gt,
-        'plate_detect_det':plate_detect_det,
-        'n_perfect':n_perfect,
-        'WER':WER,
-        'n_detected':n_detected,
-        'n_sid':n_sid,
-        'correct_p':correct_p,
-        'pred_p':pred_p,
-        'total_p':total_p,
-        'recall':recall,
-        'precision':precision
+        'plate_detect_gt'+flag:plate_detect_gt,
+        'plate_detect_det'+flag:plate_detect_det,
+        'n_perfect'+flag:n_perfect,
+        'WER_det'+flag:WER_det,
+        'WER_gt'+flag:WER_gt,
+        'n_detected'+flag:n_detected,
+        'n_sid'+flag:n_sid,
+        'correct_p'+flag:correct_p,
+        'pred_p'+flag:pred_p,
+        'total_p'+flag:total_p,
+        'recall'+flag:recall,
+        'precision'+flag:precision
         
     }
     

@@ -1,3 +1,7 @@
 #python licenceplate_yolov7_1024_aug_from_dataloader.py --time_steps 100 --aug_routine 'Default' --save_folder './latent_yolov7_1024_aug_from_dataloader_train' --load_path 'latent_yolov7_1024_aug_from_dataloader_train_8gpu/model.pt'
 
-python licenceplate_yolov7_512_aug_from_dataloader_image.py --time_steps 100 --aug_routine 'Default' --save_folder './latent_yolov7_1024_2loss_image_train' --loss_type 'l1_with_last_layer' #--load_path './latent_yolov7_1024_latentandyolo_train/model.pt'
+#python licenceplate_yolov7_512_aug_from_dataloader_image.py --time_steps 100 --aug_routine 'Default' --save_folder './latent_yolov7_1024_2loss_image_cityscapes_res' --loss_type 'l1_with_last_layer' --residual --data_path_3 '/data/licence_plate/_plate/cityscapes/leftImg8bit/all/' --load_path './latent_yolov7_1024_2loss_image_cityscapes_res/model.pt'
+
+python licenceplate_yolov7_512_aug_from_dataloader_image.py --time_steps 100 --aug_routine 'Default' --save_folder './latent_yolov7_1024_2loss_image_cityscapes_res' --loss_type 'l1_with_last_layer' --residual --data_path_3 '/data/licence_plate/_plate/cityscapes/leftImg8bit/all/' --load_path './latent_yolov7_1024_2loss_image_cityscapes_res/model.pt'
+
+#python licenceplate_yolov7_512_aug_from_dataloader_image.py --time_steps 100 --aug_routine 'Default' --save_folder './latent_yolov7_1024_lastloss_image_cityscapes_res' --loss_type 'l1_last_layer' --residual --data_path_3 '/data/licence_plate/_plate/cityscapes/leftImg8bit/all/' --load_path './latent_yolov7_1024_lastloss_image_cityscapes_res/model.pt'

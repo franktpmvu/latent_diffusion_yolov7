@@ -599,7 +599,7 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
 
     return output
 
-def eval_dataset(results,label_data):
+def eval_dataset(results,label_data,flag=''):
     correct_plate = {}
     total_p, correct_p, pred_p = 0, 0, 0
     for k, v in label_data.items():
@@ -650,8 +650,10 @@ def eval_dataset(results,label_data):
 
         print("Characters in Detected Plates = ", n_detected)
         print("Error Characters (Detected) =", n_sid)
-        WER=n_sid/n_detected
-        print("World Error Rate (Detected) = {:.4f}".format(WER))
+        WER_det=n_sid/n_detected
+        WER_gt=n_sid/n_perfect
+        print("World Error Rate (Detected) = {:.4f}".format(WER_det))
+        print("World Error Rate (Ground Truth) = {:.4f}".format(WER_gt))
 
         print("\nNumber of Perfectly Recognized Plates = ", n_perfect)
         if not correct_p ==0:
@@ -667,17 +669,18 @@ def eval_dataset(results,label_data):
         recall=0
         precision=0
     accuracy_dict={
-        'plate_detect_gt':plate_detect_gt,
-        'plate_detect_det':plate_detect_det,
-        'n_perfect':n_perfect,
-        'WER':WER,
-        'n_detected':n_detected,
-        'n_sid':n_sid,
-        'correct_p':correct_p,
-        'pred_p':pred_p,
-        'total_p':total_p,
-        'recall':recall,
-        'precision':precision
+        'plate_detect_gt'+flag:plate_detect_gt,
+        'plate_detect_det'+flag:plate_detect_det,
+        'n_perfect'+flag:n_perfect,
+        'WER_det'+flag:WER_det,
+        'WER_gt'+flag:WER_gt,
+        'n_detected'+flag:n_detected,
+        'n_sid'+flag:n_sid,
+        'correct_p'+flag:correct_p,
+        'pred_p'+flag:pred_p,
+        'total_p'+flag:total_p,
+        'recall'+flag:recall,
+        'precision'+flag:precision
         
     }
     

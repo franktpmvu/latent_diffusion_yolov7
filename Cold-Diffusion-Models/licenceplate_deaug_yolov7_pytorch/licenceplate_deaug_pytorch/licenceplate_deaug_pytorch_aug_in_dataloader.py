@@ -554,6 +554,45 @@ class GaussianDiffusion(nn.Module):
         x_recon_yolo = non_max_suppression(x_recon_yolo[0], labels=[], multi_label=True)
 
         return x_recon_yolo
+    
+    def forward_yolo_wodiffusion(self, batch_size = 16, img=None):
+        
+        x_latent,y = self.yolomodel.module.forward_submodel(img,self.yolomodel.module.before_diffusion_model,output_y=True)
+        #x_latent,y = self.yolomodel(img,mode='before',output_y=True)
+
+        x_yolo = self.yolomodel.module.forward_submodel(x_latent,self.yolomodel.module.after_diffusion_model,init_y=y)
+        #x_recon_yolo = self.yolomodel(x_recon,mode='after',init_y=y)
+        x_recon_yolo = non_max_suppression(x_yolo[0], labels=[], multi_label=True)
+
+        return x_recon_yolo
+    
+    def forward_yolo_2noise(self, batch_size = 16, img=None, t=None, g=None):
+        
+        x_latent,y = self.yolomodel.module.forward_submodel(img,self.yolomodel.module.before_diffusion_model,output_y=True)
+        #x_latent,y = self.yolomodel(img,mode='before',output_y=True)
+
+        if t==None:
+            t=self.num_timesteps
+            step_t = torch.full((batch_size,), t - 1, dtype=torch.long).cuda()
+        else:
+            step_t = t
+            
+        if g==None:
+            g=self.num_timesteps
+            step_g = torch.full((batch_size,), g - 1, dtype=torch.long).cuda()
+        else:
+            step_g = g
+        #print(x_latent.shape)
+        #print(step.shape)
+        x_recon = self.denoise_fn(x_latent, step_t, step_g)
+        
+        y[-1]=x_recon
+        x_recon_yolo = self.yolomodel.module.forward_submodel(x_recon,self.yolomodel.module.after_diffusion_model,init_y=y)
+        #x_recon_yolo = self.yolomodel(x_recon,mode='after',init_y=y)
+        x_recon_yolo = non_max_suppression(x_recon_yolo[0], labels=[], multi_label=True)
+
+        return x_recon_yolo
+
 
     
     @torch.no_grad()
@@ -1036,7 +1075,12 @@ class Dataset_cv2_aug_step(data.Dataset):
         bname = self.bname[index]
         #print(path)
         img = cv2.imread(str(path))
-        img, meta = self.resize(img, self.image_size)
+        if 'cityscapes' in str(path):
+            img = self.crop(img, self.image_size)
+            #print(img.shape)
+        else:
+            img, meta = self.resize(img, self.image_size)
+
         
         
         step = randint(0,99)
@@ -1081,6 +1125,18 @@ class Dataset_cv2_aug_step(data.Dataset):
         else:
             meta = {}
             return img, meta
+        
+    def crop(self, img, size):
+        h, w, c= img.shape
+        #print(img.shape)
+        low=0
+        highh=h-size
+        highw=w-size
+        y = np.random.randint(low=low,high=highh)
+        x = np.random.randint(low=low,high=highw)
+        #print('x= %d,y= %d, size= %d'%(x,y,size))
+        return img[y:y+size,x:x+size,:]
+
 
         
 # trainer class
@@ -1096,6 +1152,8 @@ class Trainer(object):
         image_size = 128,
         train_batch_size = 32,
         eval_batch_size = 32,
+        eval_data_folder=None,
+        eval_data_label_folder=None,
         train_lr = 2e-5,
         train_num_steps = 100000,
         gradient_accumulate_every = 2,
@@ -1108,9 +1166,7 @@ class Trainer(object):
         load_path = None,
         dataset = None,
         shuffle=True,
-        test_mode=False,
-        eval_data_folder=None,
-        eval_data_label_folder=None
+        test_mode=False
     ):
         super().__init__()
         self.model = diffusion_model
@@ -1141,7 +1197,7 @@ class Trainer(object):
             
         self.ds = Dataset_cv2_aug_step(folder, self.aug_licence, image_size)
 
-        self.dl = cycle(data.DataLoader(self.ds, batch_size = eval_batch_size, shuffle=shuffle, pin_memory=True, num_workers=32,drop_last=True))
+        self.dl = cycle(data.DataLoader(self.ds, batch_size = train_batch_size, shuffle=shuffle, pin_memory=True, num_workers=32,drop_last=True))
         #self.opt = Adam(diffusion_model.parameters(), lr=train_lr)
         self.opt = Adam(filter(lambda p:p.requires_grad, diffusion_model.parameters()), lr=train_lr)
         #torch.autograd.set_detect_anomaly(True)
@@ -1174,6 +1230,8 @@ class Trainer(object):
                 'image_size':image_size,
                 'train_batch_size':train_batch_size,
                 'eval_batch_size':eval_batch_size,
+                'eval_data_folder':eval_data_folder,
+                'eval_data_label_folder':eval_data_label_folder,
                 'train_lr':train_lr,
                 'train_num_steps':train_num_steps,
                 'gradient_accumulate_every':gradient_accumulate_every,
@@ -1184,12 +1242,10 @@ class Trainer(object):
                 'results_folder':results_folder,
                 'load_path':load_path,
                 'dataset':dataset,
-                'shuffle':shuffle,
-                'eval_data_folder':eval_data_folder,
-                'eval_data_label_folder':eval_data_label_folder
+                'shuffle':shuffle
                 }
 
-        )
+            )
         # early stopping
         self.patience=7
         self.verbose=False
@@ -1198,6 +1254,8 @@ class Trainer(object):
         self.bestScore=None
         self.earlyStop=False
         self.valLossMin=np.Inf
+        self.best_licence_detect_gt=0
+
 
 
     def earlyStopping(self, val_loss):
@@ -1359,6 +1417,8 @@ class Trainer(object):
                     
                     with torch.no_grad():
                         yolo_results = {}
+                        yolo_results_wodifussion = {}
+                        yolo_results_clean = {}
                         for iEval, dataEval in enumerate(self.evalDl):
                             #u_val_loss = 0
 
@@ -1373,7 +1433,11 @@ class Trainer(object):
 
                             #print(data_blur.shape)
                             #print(bname)
-                            yolo_output = self.ema_model.module.forward_yolo(img=data_blur, t=step, batch_size=data_blur.shape[0])
+
+                            yolo_output = self.ema_model.module.forward_yolo(img=data_blur, batch_size=data_blur.shape[0],t=step)
+                            yolo_output_wodifussion = self.ema_model.module.forward_yolo_wodiffusion(img=data_blur, batch_size=data_blur.shape[0])
+                            yolo_output_clean = self.ema_model.module.forward_yolo_wodiffusion(img=data_clean, batch_size=data_clean.shape[0])
+                            
                             
                             for index_yolooutput , _yolo_output in enumerate(yolo_output):
                                 if _yolo_output is not None:
@@ -1383,13 +1447,37 @@ class Trainer(object):
                                         
                                     output = affine_transform(_yolo_output, sub_meta)
                                     yolo_results[bname[index_yolooutput]] = output
+                                    
+                            for index_yolooutput , _yolo_output in enumerate(yolo_output_wodifussion):
+                                if _yolo_output is not None:
+                                    sub_meta = {}
+                                    for metakey in meta.keys():
+                                        sub_meta[metakey] = meta[metakey][index_yolooutput]
+                                        
+                                    output = affine_transform(_yolo_output, sub_meta)
+                                    yolo_results_wodifussion[bname[index_yolooutput]] = output
+
+                                    
+                            for index_yolooutput , _yolo_output in enumerate(yolo_output_clean):
+                                if _yolo_output is not None:
+                                    sub_meta = {}
+                                    for metakey in meta.keys():
+                                        sub_meta[metakey] = meta[metakey][index_yolooutput]
+                                        
+                                    output = affine_transform(_yolo_output, sub_meta)
+                                    yolo_results_clean[bname[index_yolooutput]] = output
+
                         eval_dict = eval_dataset(yolo_results, self.evalDs.label_data)
+                        eval_dict_wodifussion = eval_dataset(yolo_results_wodifussion, self.evalDs.label_data,flag='_wodiffusion')
+                        eval_dict_clean = eval_dataset(yolo_results_clean, self.evalDs.label_data,flag='_clean')
                         licence_detect_gt = eval_dict['plate_detect_gt']
                         
                         #acc_val_loss = acc_val_loss + (u_val_loss/eval_len)
                         #wandb.log({"acc_val_loss": acc_val_loss})
                         wandb.log(eval_dict)
-                        self.earlyStopping(licence_detect_gt)
+                        wandb.log(eval_dict_wodifussion)
+                        wandb.log(eval_dict_clean)
+                        self.earlyStopping(-licence_detect_gt)
                         if licence_detect_gt>self.best_licence_detect_gt:
                             self.best_licence_detect_gt=licence_detect_gt
                             print('best_licence_detect_gt = %f'%self.best_licence_detect_gt)
@@ -1397,6 +1485,7 @@ class Trainer(object):
                         if self.earlyStop:
                             print('early stop in %s step.'%(str(self.step)))
                             break
+
 
 
             self.step += 1
