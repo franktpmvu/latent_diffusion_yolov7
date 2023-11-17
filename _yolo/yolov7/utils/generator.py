@@ -147,8 +147,8 @@ class plate_generator():
         self.plate_width = plate_width
         self.plate_height = plate_height
         
-        #self.char_padding = [int(0.018 * plate_width[0]), int(0.013 * plate_width[1])]
-        self.char_padding = [int(0.038 * plate_width[0]), int(0.013 * plate_width[1])]
+        self.char_padding = [int(0.018 * plate_width[0]), int(0.013 * plate_width[1])]
+        #self.char_padding = [int(0.038 * plate_width[0]), int(0.013 * plate_width[1])]
         self.char_width = [int(0.136 * plate_width[0]), int(0.12 * plate_width[1])]
         self.char_height = [int(0.6 * plate_height[0]), int(0.604 * plate_height[1])]
         self.char_upper_distance = [int(0.232 * plate_height[0]), int(0.236 * plate_height[1])]
@@ -190,12 +190,16 @@ class plate_generator():
         
         # create base plate
         #blank_time = time.time()
-        blank_plate = self.blank_plate
+        #blank_plate = self.blank_plate
 
-        _blank = blank_plate[1].copy()
-        img1, sheet1 = self.basic_plate_allrandom(_blank)
-        _blank = blank_plate[1].copy()
-        img2, sheet2 = self.basic_plate_allrandom(_blank)
+        #_blank = blank_plate[0].copy()
+        #img1, sheet1 = self.basic_plate_allrandom(_blank)
+        #_blank = blank_plate[0].copy()
+        #img2, sheet2 = self.basic_plate_allrandom(_blank)
+        
+        img1, sheet1 = self.basic_plate_allrandom()
+        img2, sheet2 = self.basic_plate_allrandom()
+
         #print("Total time taken blank_time = {} seconds".format( time.time() - blank_time))  # print total computation time
 
         
@@ -766,7 +770,9 @@ class plate_generator():
 
         
         
-    def basic_plate_allrandom(self, iplate):
+    def basic_plate_allrandom(self):
+        blank_plate = self.blank_plate
+
         
         box_padding = self.box_padding
         plate_width = self.plate_width
@@ -778,10 +784,14 @@ class plate_generator():
         dot = self.dot
         load_path = self.load_path
         classes = self.classes
+        now_load_path = load_path[np.random.randint(2)]
+        #print(now_load_path)
         
-        #plate_nums = np.random.randint(6,8,1)
-        plate_nums = plate_nums = np.random.randint(7,8,1)
+        plate_nums = np.random.randint(6,8,1)
+        #plate_nums = plate_nums = np.random.randint(7,8,1)
         mode = plate_nums[0]-6
+        iplate = blank_plate[mode].copy()
+        #print(mode)
         license = np.random.randint(0,34,size=plate_nums)
         plate_format = np.random.randint(0,2)
         if plate_nums==7:
