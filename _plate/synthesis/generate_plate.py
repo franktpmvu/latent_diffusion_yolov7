@@ -14,6 +14,7 @@ import os
 from PIL import Image
 import random
 import time
+from tqdm import tqdm
 
 aug_licence = mix_augmentaion()
 aug_licence.imshape=(512,512)
@@ -33,29 +34,35 @@ def generate_plate():
     img, msg = image_generator.get_plate()
     return img, msg
 
-def multi_cpu_for_loop(n=100, output_dir='result_350k'):
+def multi_cpu_for_loop(n=100, output_dir='opt'):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
     with concurrent.futures.ProcessPoolExecutor() as executor:
+        # Submit all tasks and create a list of futures
         futures = [executor.submit(generate_plate) for _ in range(n)]
 
-        for i, future in enumerate(concurrent.futures.as_completed(futures)):
-            img, msg = future.result()
+        # Initialize a tqdm progress bar
+        with tqdm(total=n, desc="Processing Images", unit="image") as progress_bar:
+            for i, future in enumerate(concurrent.futures.as_completed(futures)):
+                img, msg = future.result()
 
-            # Format the filename as '%08d'
-            base_filename = f'{i:08d}'
-            img_path = os.path.join(output_dir, base_filename + '.jpg')
-            txt_path = os.path.join(output_dir, base_filename + '.txt')
+                # Format the filename as '%08d'
+                base_filename = f'{i:08d}'
+                img_path = os.path.join(output_dir, base_filename + '.jpg')
+                txt_path = os.path.join(output_dir, base_filename + '.txt')
 
-            # Save image using cv2.imwrite
-            cv2.imwrite(img_path, img)
+                # Save image using cv2.imwrite
+                cv2.imwrite(img_path, img)
 
-            # Save label to a text file
-            with open(txt_path, 'w') as file:
-                flattened_msg = [str(item) for sublist in msg for item in sublist]
-                formatted_msg = ','.join(flattened_msg)
-                file.write(formatted_msg + '\n')
+                # Save label to a text file, format the message to exclude '[' and ']', using ',' to join
+                with open(txt_path, 'w') as file:
+                    for sublist in msg:
+                        formatted_line = ','.join(map(str, sublist))
+                        file.write(formatted_line + '\n')
+
+                # Update the progress bar
+                progress_bar.update(1)
 
     print(f'Images and labels saved in {output_dir}')
 
