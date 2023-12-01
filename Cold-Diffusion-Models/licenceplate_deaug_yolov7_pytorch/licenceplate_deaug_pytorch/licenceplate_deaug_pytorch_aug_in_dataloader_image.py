@@ -215,12 +215,18 @@ class Unet(nn.Module):
         dim_mults=(1, 2, 4, 8),
         channels = 3,
         with_time_emb = True,
-        residual = False
+        residual = False,
+        predict_noise = False
     ):
         super().__init__()
         self.channels = channels
         self.residual = residual
+        self.predict_noise = predict_noise
         print("Is Time embed used ? ", with_time_emb)
+        if self.residual and self.predict_noise:
+            print("predict_noise cannot with residual, now will use predict_noise")
+            self.residual=False
+
 
         dims = [channels, *map(lambda m: dim * m, dim_mults)]
         in_out = list(zip(dims[:-1], dims[1:]))
@@ -297,6 +303,9 @@ class Unet(nn.Module):
             x = upsample(x)
         if self.residual:
             return self.final_conv(x) + orig_x
+        if self.predict_noise:
+            return orig_x-self.final_conv(x) 
+
 
         return self.final_conv(x)
 
