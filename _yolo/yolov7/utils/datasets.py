@@ -728,7 +728,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
     
     
 def create_dataloader_generator(path, imgsz, batch_size, stride, opt, hyp=None, augment=False, cache=False, pad=0.0, rect=False,
-                      rank=-1, world_size=1, workers=8, image_weights=False, quad=False, prefix='', mode='train'):
+                      rank=-1, world_size=1, workers=8, image_weights=False, quad=False, prefix='', mode='train', bg_image_from='input'):
     # Make sure only the first process in DDP process the dataset first, and the following others can use the cache
     with torch_distributed_zero_first(rank):
         dataset = LoadImagesAndLabels_generate(path, imgsz, batch_size,
@@ -741,7 +741,7 @@ def create_dataloader_generator(path, imgsz, batch_size, stride, opt, hyp=None, 
                                       pad=pad,
                                       image_weights=image_weights,
                                       prefix=prefix,
-                                      mode=mode)
+                                      mode=mode, bg_image_from=bg_image_from)
 
     batch_size = min(batch_size, len(dataset))
     nw = min([os.cpu_count() // world_size, batch_size if batch_size > 1 else 0, workers])  # number of workers
@@ -761,7 +761,7 @@ def create_dataloader_generator(path, imgsz, batch_size, stride, opt, hyp=None, 
     
 class LoadImagesAndLabels_generate(Dataset):  # for training
     def __init__(self, path, img_size=640, batch_size=16, augment=False, hyp=None, rect=False, image_weights=False,
-                 cache_images=False, single_cls=False, stride=32, pad=0.0, prefix='', mode='train'):
+                 cache_images=False, single_cls=False, stride=32, pad=0.0, prefix='', mode='train', bg_image_from='input'):
         self.img_size = img_size
         self.image_files = list(glob.glob(os.path.join(path, '*.[pj][np][g]')))
 
@@ -789,6 +789,7 @@ class LoadImagesAndLabels_generate(Dataset):  # for training
         self.image_generator = plate_generator(augmentor=self.aug_licence)
         self.indices = range(self.__len__())
         self.segments = [ [] for _ in range(self.__len__()) ]
+        self.bg_image_from = bg_image_from
 
 
         # self.indices = range(n)
@@ -957,18 +958,26 @@ class LoadImagesAndLabels_generate(Dataset):  # for training
         
         #warnings.filterwarnings('ignore')
 
-        image_file = self.image_files[index]
-        image = cv2.imread(image_file)
-        #print(image.shape)
+        if self.bg_image_from=='input':
+            image_file = self.image_files[index]
+            image = cv2.imread(image_file)
+            #print(image.shape)
         
-        img, msg = self.image_generator.get_plate(bg_image=image)
-        #print(img.shape)
-        #warnings.filterwarnings('default')
+            img, msg = self.image_generator.get_plate(bg_image=image)
+            #print(img.shape)
+            #warnings.filterwarnings('default')
+        else:
+            img, msg = self.image_generator.get_plate()
+
 
         h,w = img.shape[0:2]
         label = np.array(msg)
         if train:
-            return img, (h,w),  (h,w), label, image_file.split('/')[-1]
+            if self.bg_image_from=='input':
+                return img, (h,w),  (h,w), label, image_file.split('/')[-1]
+            else:
+                return img, (h,w),  (h,w), label, 'gen_data.png'
+
         else:
             return img, (h,w),  (h,w)
 

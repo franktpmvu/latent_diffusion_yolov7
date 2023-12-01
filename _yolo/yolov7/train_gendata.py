@@ -242,6 +242,11 @@ def train(hyp, opt, device, tb_writer=None):
         logger.info('Using SyncBatchNorm()')
 
     # Trainloader
+    #dataloader, dataset = create_dataloader_generator(train_path, imgsz, batch_size, gs, opt,
+    #                                        hyp=hyp, augment=True, cache=opt.cache_images, rect=opt.rect, rank=rank,
+    #                                        world_size=opt.world_size, workers=opt.workers,
+    #                                        image_weights=opt.image_weights, quad=opt.quad, prefix=colorstr('train: '), mode='train',bg_image_from='gen')
+    
     dataloader, dataset = create_dataloader_generator(train_path, imgsz, batch_size, gs, opt,
                                             hyp=hyp, augment=True, cache=opt.cache_images, rect=opt.rect, rank=rank,
                                             world_size=opt.world_size, workers=opt.workers,
@@ -287,10 +292,22 @@ def train(hyp, opt, device, tb_writer=None):
     model.nc = nc  # attach number of classes to model
     model.hyp = hyp  # attach hyperparameters to model
     model.gr = 1.0  # iou loss ratio (obj_loss = 1.0 or iou)
-    model.class_weights = torch.from_numpy(np.ones(35)).to(device)
+    #model.class_weights = torch.from_numpy(np.ones(35)).to(device)
+    class_weights=np.ones(nc)
+    class_weights[-1]=2.0
+    class_weights[0:-1]=13.0/34.0
+    class_weights=1/class_weights
+    class_weights=class_weights/class_weights.sum()
+    class_weights=class_weights*nc
+    
+    model.class_weights = torch.from_numpy(class_weights).to(device)
+    print(model.class_weights)
+    print(opt.image_weights)
+
     #model.class_weights = labels_to_class_weights(dataset.labels, nc).to(device) * nc  # attach class weights
     model.names = names
 
+    
     # Start training
     t0 = time.time()
     nw = max(round(hyp['warmup_epochs'] * nb), 1000)  # number of warmup iterations, max(3 epochs, 1k iterations)

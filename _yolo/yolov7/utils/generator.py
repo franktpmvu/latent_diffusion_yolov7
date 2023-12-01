@@ -264,7 +264,8 @@ class plate_generator():
         if not bg_image is None:
             rnd = crop_image(bg_image, hwsize = self.image_size)
         else:
-            rnd = next(self.coco_images)
+            #rnd = next(self.coco_images)
+            rnd = self.random_bg(image_size=self.image_size)
         
         #fimg = self.match_contrast_and_brightness(fimg, rnd) #have some bug will change color of words
         #print("Total time taken put_plate_on_bg_time = {} seconds".format( time.time() - put_plate_on_bg_time))  # print total computation time
@@ -300,6 +301,54 @@ class plate_generator():
 
         return nimg, label
     
+    def randColor(self):
+        return np.array([np.random.random(), np.random.random(), np.random.random()]).reshape((1, 1, 3))
+    
+    def safeDivide(self, a, b):
+        return np.divide(a, np.maximum(b, 0.001))
+
+    
+    def random_bg(self,image_size=512):
+        def getX(): return xArray
+        def getY(): return yArray
+
+        dX, dY = image_size, image_size
+        xArray = np.linspace(0.0, 1.0, dX).reshape((1, dX, 1))
+        yArray = np.linspace(0.0, 1.0, dY).reshape((dY, 1, 1))  
+
+        functions = [(0, self.randColor),
+                    (0, getX),
+                    (0, getY),
+                    (1, np.sin),
+                    (1, np.cos),
+                    (2, np.add),
+                    (2, np.subtract),
+                    (2, np.multiply),
+                    (2, self.safeDivide)]
+        depthMin = 2
+        depthMax = 10
+
+        def buildImg(depth = 0):
+            funcs = [f for f in functions if
+                        (f[0] > 0 and depth < depthMax) or
+                        (f[0] == 0 and depth >= depthMin)]
+            idx = np.random.choice(len(funcs))
+            nArgs, func = funcs[idx]
+            args = [buildImg(depth + 1) for n in range(nArgs)]
+            return func(*args)
+
+        img = buildImg()
+        while (img.shape[2] != 3) or ((dX/img.shape[0]) != 1) or ((dY/img.shape[1]) != 1):
+            img = buildImg()
+        #print((dX / img.shape[0], dY / img.shape[1], 3 / img.shape[2]))
+        # Ensure it has the right dimensions, dX by dY by 3
+        #img = np.tile(img, (dX / img.shape[0], dY / img.shape[1], 3 / img.shape[2]))
+
+        # Convert to 8-bit, send to PIL and save
+        img8Bit = np.uint8(np.rint(img.clip(0.0, 1.0) * 255.0))
+
+        return np.array(img8Bit)
+
     
     
     
@@ -545,17 +594,19 @@ class plate_generator():
         # Random direction for perspective distortion
         direct = np.random.choice([1, -1], size=2)
         # Random factors for perspective distortion
-        r1 = np.random.randint(1, 51) / 100
-        r2 = np.random.randint(1, 25) / 100
-        #r1 = np.random.randint(1, 2) / 100
-        #r2 = np.random.randint(1, 2) / 100
+        r1 = np.random.randint(10, 51) / 100
+        r2 = np.random.randint(5, 16) / 100
+        #r1 = np.random.randint(1, 51) / 100
+        #r2 = np.random.randint(1, 25) / 100
+        #r1 = np.random.randint(1, 10) / 100
+        #r2 = np.random.randint(1, 5) / 100
         # Calculate distortion based on random factors and direction
         dy = r1 * h * direct[0]
         dx = r2 * w * direct[1]
 
         # Random angle for rotation (in degrees)
-        angle = np.random.uniform(-30, 30)  # Adjust the range as needed
-        #angle = np.random.uniform(-1, 1)  # Adjust the range as needed
+        #angle = np.random.uniform(-30, 30)  # Adjust the range as needed
+        angle = np.random.uniform(-9, 9)  # Adjust the range as needed
         angle_rad = np.deg2rad(angle)  # Convert to radians
 
         # Calculate the rotation matrix for the given angle
