@@ -34,6 +34,7 @@ parser.add_argument('--train_routine', default='Final', type=str)
 parser.add_argument('--sampling_routine', default='x0_step_down', type=str)
 parser.add_argument('--remove_time_embed', action="store_true")
 parser.add_argument('--residual', action="store_true")
+parser.add_argument('--predict_noise', action="store_true")
 parser.add_argument('--loss_type', default='l1', type=str)#l1,l1_with_last_layer
 parser.add_argument('--yolomodel', default='/data/licence_plate/_yolo/yolov7/runs/train/exp2/weights/best_288_state_dict.pt', type=str)
 parser.add_argument('--yolohyperparam', default='/data/licence_plate/_yolo/yolov7/cfg/deploy/hyp.scratch.tiny.yaml', type=str)
@@ -79,7 +80,8 @@ model = Unet_2timeEmb(
     dim_mults = (1, 2, 4, 8),
     channels=128,
     with_time_emb=not(args.remove_time_embed),
-    residual=args.residual
+    residual=args.residual,
+    predict_noise=args.predict_noise
 ).cuda()
 
 diffusion = GaussianDiffusion(
