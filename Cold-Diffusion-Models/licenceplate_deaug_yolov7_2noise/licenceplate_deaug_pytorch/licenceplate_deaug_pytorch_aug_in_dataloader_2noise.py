@@ -1469,7 +1469,7 @@ class Trainer(object):
         if not test_mode:
             
             wandb.init(
-                project="diffusion_latent_512_2noise_t01_g02_cityscapes_res",
+                project="diffusion_latent_ep79_512_2noise_t100_g10_predictnoise",
                 config={
                 'ema_decay':ema_decay,
                 'image_size':image_size,
@@ -1654,7 +1654,7 @@ class Trainer(object):
                 if self.step % (self.save_and_sample_every * 100) == 0:
                     self.save(self.step)
                     
-                if self.step % (self.save_and_sample_every * 10) == 0 and self.eval is not None and self.step >= self.save_and_sample_every * 50:
+                if self.step % (self.save_and_sample_every * 10) == 0 and self.eval is not None and self.step >= self.save_and_sample_every * 10:
                     #acc_val_loss=0
                     eval_len=self.evalDs.__len__()
                     
@@ -1724,6 +1724,9 @@ class Trainer(object):
                         wandb.log(eval_dict)
                         wandb.log(eval_dict_wodifussion)
                         wandb.log(eval_dict_clean)
+                        diff_after_diffution = eval_dict['plate_detect_gt'] - eval_dict_wodifussion['plate_detect_gt_wodiffusion']
+                        wandb.log({"plate_detect_gt_diff_after_diffution": diff_after_diffution})
+
                         self.earlyStopping(-licence_detect_gt)
                         if licence_detect_gt>self.best_licence_detect_gt:
                             self.best_licence_detect_gt=licence_detect_gt

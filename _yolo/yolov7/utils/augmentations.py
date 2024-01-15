@@ -7,6 +7,10 @@ from scipy.stats import norm
 from matplotlib import pyplot as plt
 import torch
 import math
+import time
+from scipy.ndimage import gaussian_filter
+from skimage.color import rgb2hsv, hsv2rgb
+
 
 class mix_augmentaion(object):
     def __init__(self,imshape=(256,256),noiseStepMode='direct'):
@@ -242,6 +246,22 @@ class mix_augmentaion(object):
         frame[frame < 0] = 0
         frame = np.asarray(frame, dtype=np.uint8)
         return frame
+    
+    def convert_to_hsv_and_modify(self, image):
+        hsl_image = rgb2hsv(image)
+        # Create a heavily smoothed random background patch
+        
+        patch = np.random.rand(self.imshape[0], self.imshape[1], 3)
+        patch_smoothed = gaussian_filter(patch, sigma=50)
+        # Average lightness
+        hsl_image[:, :, 2] = (hsl_image[:, :, 2] + patch_smoothed[:, :, 2]) / 2
+        # Random shifts and stretches on HSV channels
+        hsl_image[:, :, 0] = np.clip(hsl_image[:, :, 0] + np.random.uniform(-0.1, 0.1), 0, 1)
+        hsl_image[:, :, 1] = np.clip(hsl_image[:, :, 1] * np.random.uniform(0.9, 1.1), 0, 1)
+        hsl_image[:, :, 2] = np.clip(hsl_image[:, :, 2] * np.random.uniform(0.9, 1.1), 0, 1)
+        modified_rgb = hsv2rgb(hsl_image)
+        return modified_rgb
+
 
     def adjust_gamma(self,image, gamma=None):
         image=copy.deepcopy(image)
@@ -335,6 +355,12 @@ class mix_augmentaion(object):
         
         
     def mix_aug(self, img, step, random=False):
+        
+        
+        
+        #start_time = time.time()
+        
+        #init_time = time.time()
         # img= numpy [255,255,3]
         # step= 0~1
         if random:
@@ -345,16 +371,46 @@ class mix_augmentaion(object):
         #print(np.min(img))
         img = img.astype(np.uint8)
         height, width, _ = img.shape
-        pos = [(self.spotlignt_position[0][0]*width,self.spotlignt_position[0][1]*height)]
         #self.pixelate_blocks=60
+        #print("Total time taken init_time = {} seconds".format( time.time() - init_time))  # print total computation time
+
+        
+        
+        # add_rain
+        #add_rain_time = time.time()
         img = self.add_rain_step(img,step_ratio=step,slant = self.rain_slant)
+        #print("Total time taken add_rain_time = {} seconds".format( time.time() - add_rain_time))  # print total computation time
+        # random shift in hsv
+        #shift_hsv_time = time.time()
+        #img = self.convert_to_hsv_and_modify(img)
+        #print("Total time taken shift_hsv_time = {} seconds".format( time.time() - shift_hsv_time))  # print total computation time
+
+        
+        
+        # add_spot_light
+        #add_spot_light_time = time.time()
+
+        pos = [(self.spotlignt_position[0][0]*width,self.spotlignt_position[0][1]*height)]
         img = self.add_spot_light_step(img,step_ratio=step,light_position=pos,transparency=self.spotlight_transparency,reverse=self.spotlight_reverse)
+        #print("Total time taken add_spot_light_time = {} seconds".format( time.time() - add_spot_light_time))  # print total computation time
+
+        
         #print(1-(1-self.gamma)*step)
         #print('dsadsada')
+        
+        # adj gamma
+        #gamma_time = time.time()
+
         img = self.adjust_gamma(img,gamma=1-(1-self.gamma)*step)
         #img = self.pixelate(img,blocks=self.pixelate_blocks,step_ratio=step)
+        #print("Total time taken gamma_time = {} seconds".format( time.time() - gamma_time))  # print total computation time
 
+        
+        # deresolution
+        #de_resolution_time = time.time()
         img = self.deresolution(img,blocks=self.pixelate_blocks,step_ratio=step)
+        
+        #print("Total time taken mix_aug = {} seconds".format( time.time() - start_time))  # print total computation time
 
         #img = self.pixelate_cv2(img,blocks=self.pixelate_blocks,step_ratio=step)
 

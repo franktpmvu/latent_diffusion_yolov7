@@ -9,6 +9,8 @@ import os
 import glob
 import torch
 from torch.utils.data import Dataset, DataLoader
+import math
+
 
 
 
@@ -199,6 +201,7 @@ class plate_generator():
         
         img1, sheet1 = self.basic_plate_allrandom()
         img2, sheet2 = self.basic_plate_allrandom()
+        
 
         #print("Total time taken blank_time = {} seconds".format( time.time() - blank_time))  # print total computation time
 
@@ -236,15 +239,68 @@ class plate_generator():
 
         shape1 = img1.shape[0:2]
         shape2 = img2.shape[0:2]
+        
+        _iplate1 = img1.copy()
+        _iplate2 = img2.copy()
+        nw=self.image_size
+        nh=self.image_size
+        #print(sheet1)
+        #print(sheet2)
+        #print(img1.shape)
+        #print(img2.shape)
+        size_small1 = img1.shape[0:2]
+        size_small2 = img2.shape[0:2]
+        #print(size_small1)
+        #print(size_small2)
         while True:
-            _iplate1 = img1.copy()
-            _iplate2 = img2.copy()
-            blank1, offset1 = self.paste_to_black_BG(_iplate1,nw=self.image_size,nh=self.image_size)
-            blank2, offset2 = self.paste_to_black_BG(_iplate2,nw=self.image_size,nh=self.image_size)
-            dst1, M1 = self.perspective_transform_with_angle(shape1, blank1, offset1)
-            dst2, M2 = self.perspective_transform_with_angle(shape2, blank2, offset2)
-            if not(self.intersect_optimized(dst1, dst2)):
+            offset_h1 = np.random.randint(0+nh//8,nh-size_small1[0]-nh//8)
+            offset_w1 = np.random.randint(0+nw//8,nw-size_small1[1]-nw//8)
+            offset_h2 = np.random.randint(0+nh//8,nh-size_small2[0]-nh//8)
+            offset_w2 = np.random.randint(0+nw//8,nw-size_small2[1]-nw//8)
+            xs1 = np.random.uniform(-60, 60)
+            ys1 = np.random.uniform(-60, 60)
+            zs1 = np.random.uniform(-20, 20)
+            xs2 = np.random.uniform(-60, 60)
+            ys2 = np.random.uniform(-60, 60)
+            zs2 = np.random.uniform(-20, 20)
+            #xs1 = 0
+            #ys1 = 0
+            #zs1 = 0
+            #xs2 = 0
+            #ys2 = 0
+            #zs2 = 0
+
+
+            #offset1 = [offset_h1,offset_w1]
+            #offset2 = [offset_h2,offset_w2]
+            #angles1 = [xs1,ys1,zs1]
+            #angles2 = [xs2,ys2,zs2]
+            #print('-------')
+            #print(size_small1)
+            #print(size_small2)
+            #print(offset1)
+            #print(offset2)
+            #print(angles1)
+            #print(angles2)
+            #print('-------')
+            
+            blank1, offset1 = self.paste_to_black_BG(_iplate1,nw=self.image_size,nh=self.image_size,offset_h=offset_h1,offset_w=offset_w1)
+            blank2, offset2 = self.paste_to_black_BG(_iplate2,nw=self.image_size,nh=self.image_size,offset_h=offset_h2,offset_w=offset_w2)
+
+            #dst1, M1 = self.perspective_transform_with_angle(shape1, blank1, offset1)
+            #dst2, M2 = self.perspective_transform_with_angle(shape2, blank2, offset2)
+
+            dst1, M1 = self.perspective_transform(blank1, theta_x=xs1, theta_y=ys1, theta_z=zs1)
+            dst2, M2 = self.perspective_transform(blank2, theta_x=xs2, theta_y=ys2, theta_z=zs2)
+
+
+
+            #nooverlap = self.check_no_overlap(self.image_size, size_small1, offset1, angles1, size_small2, offset2, angles2)
+
+            if  not self.intersect_optimized(dst1, dst2):
                 break
+                
+
                 
                 
         # merge image
@@ -587,6 +643,7 @@ class plate_generator():
         return intersection
 
     def perspective_transform_with_angle(self, img_shape, blank_image, offset):
+        #before 231215
         h, w = img_shape
         nh, nw, nch = blank_image.shape
         offset_w, offset_h = offset
@@ -642,14 +699,178 @@ class plate_generator():
         dst = cv2.warpPerspective(blank_image, M, (nw, nh))
 
         return dst, M
+    
+    def get_dst_pts(self, h, w, angles, offset):
+        sin_x, cos_x = np.sin(np.radians(angles[0])), np.cos(np.radians(angles[0]))
+        sin_y, cos_y = np.sin(np.radians(angles[1])), np.cos(np.radians(angles[1]))
+        sin_z, cos_z = np.sin(np.radians(angles[2])), np.cos(np.radians(angles[2]))
+        dx, dy = offset
+
+        d = np.sqrt(h**2 + w**2)
+        f = d / (2 * sin_z if sin_z != 0 else 1)
+        dz = f
+
+        RX = np.array([[1, 0,      0,     0],
+                       [0, cos_x, -sin_x, 0],
+                       [0, sin_x,  cos_x, 0],
+                       [0, 0,      0,     1]])
+
+        RY = np.array([[cos_y, 0, -sin_y, 0],
+                       [0,     1,  0,     0],
+                       [sin_y, 0,  cos_y, 0],
+                       [0,     0,  0,     1]])
+
+        RZ = np.array([[cos_z, -sin_z, 0, 0],
+                       [sin_z,  cos_z, 0, 0],
+                       [0,      0,     1, 0],
+                       [0,      0,     0, 1]])
+
+        R = RX.dot(RY).dot(RZ)
+
+        T = np.array([[1, 0, 0, dx],
+                      [0, 1, 0, dy],
+                      [0, 0, 1, dz],
+                      [0, 0, 0, 1]])
+
+        A1 = np.array([[1, 0, -w/2],
+                       [0, 1, -h/2],
+                       [0, 0,   1],
+                       [0, 0,   1]])
+
+        A2 = np.array([[f, 0, w/2, 0],
+                       [0, f, h/2, 0],
+                       [0, 0,  1,  0]])
+
+        # Combine all transformations
+        transformation_matrix = A2.dot(T).dot(R).dot(A1)
+
+        # Corners of the image
+        corners = np.array([
+            [0, 0, 1],
+            [w, 0, 1],
+            [w, h, 1],
+            [0, h, 1]
+        ])
+
+        # Apply transformation
+        transformed_corners = np.dot(transformation_matrix, corners.T).T
+
+        # Normalize and convert to 2D points
+        dst_pts = transformed_corners[:, :2] / transformed_corners[:, [2]]
+        #print(dst_pts)
+        
+        return dst_pts
+
+    
+    def perspective_transform(self, img, theta_x=0, theta_y=0, theta_z=0,dx=0, dy=0, dz=0, f=0):
+        radian_x = math.radians(theta_x)
+        radian_y = math.radians(theta_y)
+        radian_z = math.radians(theta_z)
+        sin_x = math.sin(radian_x)
+        cos_x = math.cos(radian_x)
+        sin_y = math.sin(radian_y)
+        cos_y = math.cos(radian_y)
+        sin_z = math.sin(radian_z)
+        cos_z = math.cos(radian_z)
+
+        h, w, _ = img.shape
+        d = np.sqrt(h**2 + w**2)
+        f = d / (2 * sin_z if sin_z != 0 else 1)
+        dz = f
+
+        RX = np.array([[1, 0,      0,     0],
+                       [0, cos_x, -sin_x, 0],
+                       [0, sin_x,  cos_x, 0],
+                       [0, 0,      0,     1]])
+
+        RY = np.array([[cos_y, 0, -sin_y, 0],
+                       [0,     1,  0,     0],
+                       [sin_y, 0,  cos_y, 0],
+                       [0,     0,  0,     1]])
+
+        RZ = np.array([[cos_z, -sin_z, 0, 0],
+                       [sin_z,  cos_z, 0, 0],
+                       [0,      0,     1, 0],
+                       [0,      0,     0, 1]])
+
+        R = RX.dot(RY).dot(RZ)
+
+        T = np.array([[1, 0, 0, dx],
+                      [0, 1, 0, dy],
+                      [0, 0, 1, dz],
+                      [0, 0, 0, 1]])
+
+        A1 = np.array([[1, 0, -w/2],
+                       [0, 1, -h/2],
+                       [0, 0,   1],
+                       [0, 0,   1]])
+
+        A2 = np.array([[f, 0, w/2, 0],
+                       [0, f, h/2, 0],
+                       [0, 0,  1,  0]])
+
+
+        M = A2.dot(T.dot(R.dot(A1)))
+        dst = cv2.warpPerspective(img, M, (w,h))
+
+        return dst, M
+    
+    def check_no_overlap(self, size_big, size_small1, offset1, angles1, size_small2, offset2, angles2):
+        # Function to calculate the transformed corners of a small image
+        # size_big = (1000, 1000)
+        # size_small1 = (100, 100)#[width, height]
+        # offset1 = (50, 50)# (x_offset, y_offset)
+        # angles1 = (15, 30, 45)
+        # size_small2 = (100, 100)
+        # offset2 = (200, 200)# (x_offset, y_offset)
+        # angles2 = (0, 45, 90)
+
+        def get_transformed_corners(size_small, offset, angles):
+            # Here, a simplified version of perspective transformation is used
+            # You might need a more complex transformation depending on your use case
+            # Calculate the corners of the small image
+            #corners = np.array([[0, 0], [size_small[0], 0], [size_small[0], size_small[1]], [0, size_small[1]]])
+            #corners += np.array(offset)
+            # Apply rotation (simplified, based on x, y, z angles)
+            # In a real scenario, this would involve rotation matrices
+            # This is a placeholder for actual transformation logic
+
+            transformed_corners = self.get_dst_pts(size_small[1], size_small[0], angles, offset) # Replace this with actual transformation logic
+            #transformed_corners = corners
+            # Apply offset
+            #transformed_corners += np.array(offset)
+            return transformed_corners
+
+        # Get transformed corners for both images
+        corners1 = get_transformed_corners(size_small1, offset1, angles1)
+        corners2 = get_transformed_corners(size_small2, offset2, angles2)
+
+        # Calculate axis-aligned bounding boxes
+        bbox1 = [np.min(corners1, axis=0), np.max(corners1, axis=0)]# y,x
+        bbox2 = [np.min(corners2, axis=0), np.max(corners2, axis=0)]# y,x
+        print(bbox1)
+        print(bbox2)
+        print(corners1)
+        print(corners2)
+
+        # Check for overlap
+        overlap = not (bbox1[1][0] < bbox2[0][0] or bbox1[0][0] > bbox2[1][0] or
+                       bbox1[1][1] < bbox2[0][1] or bbox1[0][1] > bbox2[1][1])
+
+        return not overlap
+
+
 
         
-    def paste_to_black_BG(self, iresize, nw=512, nh=512):
+    def paste_to_black_BG(self, iresize, nw=512, nh=512, offset_h=None, offset_w=None):
         ### Create a blank black image and overlay plate on it
         h, w, ch = iresize.shape
         blank_image = np.zeros((nh,nw,3), np.uint8)
-        offset_h = np.random.randint(0+nh//8,nh-h-nh//8)
-        offset_w = np.random.randint(0+nw//8,nw-w-nw//8)
+        if offset_h is None:
+            offset_h = np.random.randint(0+nh//8,nh-h-nh//8)
+        if offset_w is None:
+            offset_w = np.random.randint(0+nw//8,nw-w-nw//8)
+            
         blank_image[offset_h:offset_h+h, offset_w:offset_w+w] = iresize
 
         return blank_image, [offset_w, offset_h]
@@ -658,6 +879,7 @@ class plate_generator():
     def resize_plate(self,iplate, sheet):
         h, w, ch = iplate.shape
         r = np.random.randint(5,16)/10
+        #r = np.random.randint(25,26)/10
         nw = int(w*r*0.1)
         nh = int(h*r*0.1)
         iresize = cv2.resize(iplate, (nw,nh))
