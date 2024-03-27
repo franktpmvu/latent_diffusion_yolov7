@@ -1,0 +1,26 @@
+# COCO 2017 dataset http://cocodataset.org
+# Download command: bash ./get_coco2017.sh
+# Train command: python train.py --data ./data/coco.yaml
+# Dataset should be placed next to code folder:
+#   /parent_folder
+#     /coco
+#     /code
+
+
+# train and val datasets
+#train: ./data/plate_data_new.h5
+#train: /data/yolov7/coco/images/train2017
+train: /data/yolov7/coco/images/train2017_wo_car
+#train: /data/licence_plate/_plate/generated_data/generated_background
+val: ./data/weather_data_new.h5
+test: ./data/weather_data_new.h5
+
+# number of classes
+nc: 35
+
+# class names
+names: ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+        'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'J', 'K',
+        'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'U', 'V',
+        'W', 'X', 'Y', 'Z', 'Plate']
+

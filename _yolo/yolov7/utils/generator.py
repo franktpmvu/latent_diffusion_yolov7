@@ -10,6 +10,7 @@ import glob
 import torch
 from torch.utils.data import Dataset, DataLoader
 import math
+import random
 
 
 
@@ -129,7 +130,7 @@ def cycle(dl):
 
 
 class plate_generator():
-    def __init__(self,augmentor=None, image_size=512):
+    def __init__(self,augmentor=None, outputStep=False, image_size=512, max_step=100):
         ### Basic parameters settings
         ### 1cm = 38px
         cm = 38
@@ -148,6 +149,9 @@ class plate_generator():
         self.box_padding = 20   #px
         self.plate_width = plate_width
         self.plate_height = plate_height
+        self.outputStep = outputStep
+        self.max_step = max_step
+
         
         self.char_padding = [int(0.018 * plate_width[0]), int(0.013 * plate_width[1])]
         #self.char_padding = [int(0.038 * plate_width[0]), int(0.013 * plate_width[1])]
@@ -175,14 +179,24 @@ class plate_generator():
 
         self.colours_mode = [(0,0), (1,2), (3,4)]
         self.blank_plate = [cv2.imread(self.bg_path[0]), cv2.imread(self.bg_path[1])]
-
+        
+        self.aug_adj_shadow=True
+        self.negative_sample=True
+        print('self.aug_adj_shadow = %s'%self.aug_adj_shadow)
+        print('self.negative_sample = %s'%self.negative_sample)
         
 
-    def get_plate(self, bg_image=None):
+    def get_plate(self, bg_image=None, style='random', step=None):
         ## random choose 
         #idx = np.random.randint(3)
         #mode1, mode2 = self.colours_mode[idx]
         #start_time = time.time()
+        if self.negative_sample: 
+            #ratio is 0.5 pos 0.5 neg
+            flag_neg = torch.rand(1)
+            if flag_neg < 1:
+                return bg_image, []
+            
 
         mode1  = np.random.randint(5)
         mode2  = np.random.randint(5)
@@ -199,8 +213,8 @@ class plate_generator():
         #_blank = blank_plate[0].copy()
         #img2, sheet2 = self.basic_plate_allrandom(_blank)
         
-        img1, sheet1 = self.basic_plate_allrandom()
-        img2, sheet2 = self.basic_plate_allrandom()
+        img1, sheet1 = self.basic_plate_allrandom(style=style)
+        img2, sheet2 = self.basic_plate_allrandom(style=style)
         
 
         #print("Total time taken blank_time = {} seconds".format( time.time() - blank_time))  # print total computation time
@@ -227,7 +241,23 @@ class plate_generator():
         img2 = self.adjust_colour__(img2, mode2)
         #print("Total time taken adj3_time = {} seconds".format( time.time() - adj3_time))  # print total computation time
 
-        
+        if self.aug_adj_shadow:
+            # adj shadow
+            #adjshadow_time = time.time()
+
+
+            randshadow1=np.random.rand()*2-1
+            randshadow2=np.random.rand()*2-1
+
+            if randshadow1>0:
+                img1 = self.adjshadow(img1,randshadow1)
+
+            if randshadow2>0:
+                img2 = self.adjshadow(img2,randshadow2)
+            
+            #print("Total time taken adjshadow_time = {} seconds".format( time.time() - adjshadow_time))  # print total computation time
+
+
         # resize
         #resize_time = time.time()
         img1, sheet1 = self.resize_plate(img1, sheet1)
@@ -257,12 +287,19 @@ class plate_generator():
             offset_w1 = np.random.randint(0+nw//8,nw-size_small1[1]-nw//8)
             offset_h2 = np.random.randint(0+nh//8,nh-size_small2[0]-nh//8)
             offset_w2 = np.random.randint(0+nw//8,nw-size_small2[1]-nw//8)
-            xs1 = np.random.uniform(-60, 60)
-            ys1 = np.random.uniform(-60, 60)
-            zs1 = np.random.uniform(-20, 20)
-            xs2 = np.random.uniform(-60, 60)
-            ys2 = np.random.uniform(-60, 60)
-            zs2 = np.random.uniform(-20, 20)
+            #xs1 = np.random.uniform(-60, 60)
+            #ys1 = np.random.uniform(-60, 60)
+            #zs1 = np.random.uniform(-20, 20)
+            #xs2 = np.random.uniform(-60, 60)
+            #ys2 = np.random.uniform(-60, 60)
+            #zs2 = np.random.uniform(-20, 20)
+
+            xs1 = np.random.uniform(-9, 9)
+            ys1 = np.random.uniform(-9, 9)
+            zs1 = np.random.uniform(-9, 9)
+            xs2 = np.random.uniform(-9, 9)
+            ys2 = np.random.uniform(-9, 9)
+            zs2 = np.random.uniform(-9, 9)
             #xs1 = 0
             #ys1 = 0
             #zs1 = 0
@@ -342,26 +379,52 @@ class plate_generator():
         
         if self.augmentor:
             need_aug = np.random.randint(0,99)
+            if step is not None:
+                need_aug = 99
             if 0.01*need_aug>=self.ratio_augmentation:
                 #add_aug_time = time.time()
+                if step is None:
+                    step = np.random.randint(0,self.max_step-1)
+                
+                if step==0:
+                    augimg = nimg
+                    #rint('dsa')
+                else:
+                    augimg = self.augmentor.mix_aug(copy.deepcopy(nimg), step*(1.0/self.max_step), random=True)
 
-                step = np.random.randint(0,99)
-                nimg = self.augmentor.mix_aug(nimg, step*0.01, random=True)
                 #print("Total time taken add_aug_time = {} seconds".format( time.time() - add_aug_time))  # print total computation time
         
-
-            
+            else:
+                augimg = nimg
+        #print('(augimg-nimg).mean()=%.05f step=%d stepV=%.05f'%((augimg-nimg).mean(),step, step*(1.0/self.max_step) ))
         #msg = self.get_msg(fsheet)  # Attention! The invald labels are bot be filtered!
         label = self.get_xywh(fsheet)  # Attention! The invald labels are bot be filtered!
         #print("Total time taken all = {} seconds".format( time.time() - start_time))  # print total computation time
-
-        return nimg, label
+        #print(self.augmentor)
+        if self.outputStep:
+            return nimg, augimg, step, label
+        else:
+            return augimg, label
     
     def randColor(self):
         return np.array([np.random.random(), np.random.random(), np.random.random()]).reshape((1, 1, 3))
     
     def safeDivide(self, a, b):
         return np.divide(a, np.maximum(b, 0.001))
+    
+    def adjshadow(self, plate, ratio, shadowIntensity=None):
+        if shadowIntensity is None:
+            shadowIntensity = np.random.rand()*0.7
+        h,w,c = plate.shape
+        #print(plate.shape)
+        needadjshadow = int(h*ratio)#how h need adj shadow
+        #print(needadjshadow)
+        #print(ratio)
+        #print(shadowIntensity)
+        
+        plate[:needadjshadow,:,:] = plate[:needadjshadow,:,:]*(1-shadowIntensity)
+        
+        return plate
 
     
     def random_bg(self,image_size=512):
@@ -1043,7 +1106,7 @@ class plate_generator():
 
         
         
-    def basic_plate_allrandom(self):
+    def basic_plate_allrandom(self,style='random'):
         blank_plate = self.blank_plate
 
         
@@ -1065,23 +1128,98 @@ class plate_generator():
         mode = plate_nums[0]-6
         iplate = blank_plate[mode].copy()
         #print(mode)
-        license = np.random.randint(0,34,size=plate_nums)
-        plate_format = np.random.randint(0,2)
-        if plate_nums==7:
-            if plate_format == 0:
-                c_list1 = [license[0],license[1],license[2]]
-                c_list2 = [license[3],license[4],license[5],license[6]]
-            elif plate_format == 1:
-                c_list1 = [license[3],license[4],license[5],license[6]]
-                c_list2 = [license[0],license[1],license[2]]
-            #print('plate_nums==7')
-        if plate_nums==6:
-            if plate_format == 0:
-                c_list1 = [license[0],license[1]]
-                c_list2 = [license[2],license[3],license[4],license[5]]
-            elif plate_format == 1:
-                c_list1 = [license[2],license[3],license[4],license[5]]
-                c_list2 = [license[0],license[1]]
+        if style=='real':
+            license_eng = np.random.randint(10,34,size=plate_nums)
+            license_var = np.random.randint(0,10,size=plate_nums)
+            if plate_nums==7:
+                c_list1 = [license_eng[0],license_eng[1],license_eng[2]]
+                c_list2 = [license_var[3],license_var[4],license_var[5],license_var[6]]
+            if plate_nums==6:
+                plate_format = np.random.randint(0,4)
+                if plate_format == 0:
+                    c_list1 = [license_eng[0],license_eng[1]]
+                    c_list2 = [license_var[2],license_var[3],license_var[4],license_var[5]]
+                elif plate_format == 1:
+                    c_list1 = [license_var[2],license_var[3],license_var[4],license_var[5]]
+                    c_list2 = [license_eng[0],license_eng[1]]
+                elif plate_format == 2:
+                    c_list1 = [license_eng[2],license_eng[3],license_eng[4]]
+                    c_list2 = [license_var[0],license_var[1],license_var[2]]
+                elif plate_format == 3:
+                    c_list1 = [license_var[2],license_var[3],license_var[4]]
+                    c_list2 = [license_eng[0],license_eng[1],license_eng[2]]
+
+        elif style=='random':
+            license = np.random.randint(0,34,size=plate_nums)
+            plate_format = np.random.randint(0,2)
+            if plate_nums==7:
+                if plate_format == 0:
+                    c_list1 = [license[0],license[1],license[2]]
+                    c_list2 = [license[3],license[4],license[5],license[6]]
+                elif plate_format == 1:
+                    c_list1 = [license[3],license[4],license[5],license[6]]
+                    c_list2 = [license[0],license[1],license[2]]
+                #print('plate_nums==7')
+            if plate_nums==6:
+                if plate_format == 0:
+                    c_list1 = [license[0],license[1]]
+                    c_list2 = [license[2],license[3],license[4],license[5]]
+                elif plate_format == 1:
+                    c_list1 = [license[2],license[3],license[4],license[5]]
+                    c_list2 = [license[0],license[1]]
+                    
+        elif style=='realrandom':
+            license_eng = np.random.randint(10,34,size=plate_nums)
+            license_var = np.random.randint(0,10,size=plate_nums)
+            if plate_nums==7:
+                c_list1 = [license_eng[0],license_eng[1],license_eng[2]]
+                c_list2 = [license_var[3],license_var[4],license_var[5],license_var[6]]
+                c_t = c_list1+c_list2
+                random.shuffle(c_t)
+                c_list1 = c_t[0:3]
+                c_list2 = c_t[3:]
+                
+            if plate_nums==6:
+                plate_format = np.random.randint(0,4)
+                if plate_format == 0:
+                    c_list1 = [license_eng[0],license_eng[1]]
+                    c_list2 = [license_var[2],license_var[3],license_var[4],license_var[5]]
+                    c_t = c_list1+c_list2
+                    random.shuffle(c_t)
+                    c_list1 = c_t[0:2]
+                    c_list2 = c_t[2:]
+
+                elif plate_format == 1:
+                    c_list1 = [license_var[2],license_var[3],license_var[4],license_var[5]]
+                    c_list2 = [license_eng[0],license_eng[1]]
+                    
+                    c_t = c_list1+c_list2
+                    random.shuffle(c_t)
+                    c_list1 = c_t[0:4]
+                    c_list2 = c_t[4:]
+
+                elif plate_format == 2:
+                    c_list1 = [license_eng[2],license_eng[3],license_eng[4]]
+                    c_list2 = [license_var[0],license_var[1],license_var[2]]
+                    
+                    c_t = c_list1+c_list2
+                    random.shuffle(c_t)
+                    c_list1 = c_t[0:3]
+                    c_list2 = c_t[3:]
+
+                elif plate_format == 3:
+                    c_list1 = [license_var[2],license_var[3],license_var[4]]
+                    c_list2 = [license_eng[0],license_eng[1],license_eng[2]]
+                    
+                    c_t = c_list1+c_list2
+                    random.shuffle(c_t)
+                    c_list1 = c_t[0:3]
+                    c_list2 = c_t[3:]
+
+        else:
+            print('not implement')
+            not_implement
+
 
 
         sheet = []

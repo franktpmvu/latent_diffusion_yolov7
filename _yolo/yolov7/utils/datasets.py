@@ -728,7 +728,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
     
     
 def create_dataloader_generator(path, imgsz, batch_size, stride, opt, hyp=None, augment=False, cache=False, pad=0.0, rect=False,
-                      rank=-1, world_size=1, workers=8, image_weights=False, quad=False, prefix='', mode='train', bg_image_from='input'):
+                      rank=-1, world_size=1, workers=8, image_weights=False, quad=False, prefix='', mode='train', bg_image_from='input',plate_style='random'):
     # Make sure only the first process in DDP process the dataset first, and the following others can use the cache
     with torch_distributed_zero_first(rank):
         dataset = LoadImagesAndLabels_generate(path, imgsz, batch_size,
@@ -741,7 +741,8 @@ def create_dataloader_generator(path, imgsz, batch_size, stride, opt, hyp=None, 
                                       pad=pad,
                                       image_weights=image_weights,
                                       prefix=prefix,
-                                      mode=mode, bg_image_from=bg_image_from)
+                                      mode=mode, bg_image_from=bg_image_from,
+                                      plate_style=plate_style)
 
     batch_size = min(batch_size, len(dataset))
     nw = min([os.cpu_count() // world_size, batch_size if batch_size > 1 else 0, workers])  # number of workers
@@ -761,7 +762,7 @@ def create_dataloader_generator(path, imgsz, batch_size, stride, opt, hyp=None, 
     
 class LoadImagesAndLabels_generate(Dataset):  # for training
     def __init__(self, path, img_size=640, batch_size=16, augment=False, hyp=None, rect=False, image_weights=False,
-                 cache_images=False, single_cls=False, stride=32, pad=0.0, prefix='', mode='train', bg_image_from='input'):
+                 cache_images=False, single_cls=False, stride=32, pad=0.0, prefix='', mode='train', bg_image_from='input',plate_style='random'):
         self.img_size = img_size
         self.image_files = list(glob.glob(os.path.join(path, '*.[pj][np][g]')))
 
@@ -790,6 +791,7 @@ class LoadImagesAndLabels_generate(Dataset):  # for training
         self.indices = range(self.__len__())
         self.segments = [ [] for _ in range(self.__len__()) ]
         self.bg_image_from = bg_image_from
+        self.plate_style=plate_style
 
 
         # self.indices = range(n)
@@ -963,11 +965,11 @@ class LoadImagesAndLabels_generate(Dataset):  # for training
             image = cv2.imread(image_file)
             #print(image.shape)
         
-            img, msg = self.image_generator.get_plate(bg_image=image)
+            img, msg = self.image_generator.get_plate(bg_image=image,style=self.plate_style)
             #print(img.shape)
             #warnings.filterwarnings('default')
         else:
-            img, msg = self.image_generator.get_plate()
+            img, msg = self.image_generator.get_plate(style=self.plate_style)
 
 
         h,w = img.shape[0:2]

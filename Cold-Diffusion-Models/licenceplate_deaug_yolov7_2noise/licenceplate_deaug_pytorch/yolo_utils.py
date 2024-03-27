@@ -668,6 +668,9 @@ def eval_dataset(results,label_data,flag=''):
         plate_detect_gt=0
         recall=0
         precision=0
+        WER_det = 0
+        WER_gt = 0
+
     accuracy_dict={
         'plate_detect_gt'+flag:plate_detect_gt,
         'plate_detect_det'+flag:plate_detect_det,

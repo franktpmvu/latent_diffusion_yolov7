@@ -395,6 +395,7 @@ class Unet_2timeEmb(nn.Module):
         else:
             time_dim = None
             self.time_mlp = None
+            self.time_mlp2 = None
 
         self.downs = nn.ModuleList([])
         self.ups = nn.ModuleList([])
@@ -1469,7 +1470,7 @@ class Trainer(object):
         if not test_mode:
             
             wandb.init(
-                project="diffusion_latent_ep79_512_2noise_t100_g10_predictnoise",
+                project="diffusion_latent_ep79_512_2noise_t100_g10_predictnoise_wotimeemb",
                 config={
                 'ema_decay':ema_decay,
                 'image_size':image_size,
