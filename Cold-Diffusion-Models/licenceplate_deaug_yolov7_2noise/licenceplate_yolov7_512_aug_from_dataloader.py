@@ -21,16 +21,20 @@ import yaml
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--time_steps', default=50, type=int)
+parser.add_argument('--t_steps', default=50, type=int)
+parser.add_argument('--g_steps', default=50, type=int)
 parser.add_argument('--train_steps', default=700000, type=int)
 parser.add_argument('--save_folder', default='./results_AOLP', type=str)
 parser.add_argument('--load_path', default=None, type=str)
 parser.add_argument('--data_path_1', default='/data/licence_plate/_plate/generated_data/result2/img/', type=str)
 parser.add_argument('--data_path_2', default='/data/licence_plate/_plate/generated_data/result3/img/', type=str)
+parser.add_argument('--data_path_3', default='', type=str)
 parser.add_argument('--aug_routine', default='Default', type=str)
 parser.add_argument('--train_routine', default='Final', type=str)
 parser.add_argument('--sampling_routine', default='x0_step_down', type=str)
 parser.add_argument('--remove_time_embed', action="store_true")
 parser.add_argument('--residual', action="store_true")
+parser.add_argument('--predict_noise', action="store_true")
 parser.add_argument('--loss_type', default='l1', type=str)#l1,l1_with_last_layer
 parser.add_argument('--yolomodel', default='/data/licence_plate/_yolo/yolov7/runs/train/exp2/weights/best_288_state_dict.pt', type=str)
 parser.add_argument('--yolohyperparam', default='/data/licence_plate/_yolo/yolov7/cfg/deploy/hyp.scratch.tiny.yaml', type=str)
@@ -50,7 +54,7 @@ yolomodel = Model_with_diffusion(args.yolocfg, ch=3, nc=args.yoloclass, anchors=
 yolomodel.load_state_dict(torch.load(args.yolomodel))
 yolomodel.eval()
 yolomodel.create_subnetwork()
-yolomodel = torch.nn.DataParallel(yolomodel, device_ids=range(torch.cuda.device_count()))
+#yolomodel = torch.nn.DataParallel(yolomodel, device_ids=range(torch.cuda.device_count()))
 
 #yolomodel = torch.nn.DataParallel(yolomodel, device_ids=range(torch.cuda.device_count()))
 
@@ -76,7 +80,8 @@ model = Unet_2timeEmb(
     dim_mults = (1, 2, 4, 8),
     channels=128,
     with_time_emb=not(args.remove_time_embed),
-    residual=args.residual
+    residual=args.residual,
+    predict_noise=args.predict_noise
 ).cuda()
 
 diffusion = GaussianDiffusion(
@@ -85,6 +90,8 @@ diffusion = GaussianDiffusion(
     device_of_kernel = 'cuda',
     channels = 128,
     timesteps = args.time_steps,        # number of steps
+    t_steps = args.t_steps,        # number of steps
+    g_steps = args.g_steps,        # number of steps
     loss_type = args.loss_type,                   # L1 or L2
     aug_routine=args.aug_routine,
     train_routine = args.train_routine,
@@ -95,11 +102,17 @@ diffusion = GaussianDiffusion(
 import torch
 diffusion = torch.nn.DataParallel(diffusion, device_ids=range(torch.cuda.device_count()))
 
+if not args.data_path_3 is '':
+    datasets=[args.data_path_1,args.data_path_2,args.data_path_3]
+else:
+    datasets=[args.data_path_1,args.data_path_2]
+
+
 trainer = Trainer(
     diffusion,
-    [args.data_path_1,args.data_path_2],
+    datasets,
     image_size = 512,
-    train_batch_size = 16,
+    train_batch_size = 32,
     eval_batch_size = 32,
     train_lr = 2e-5,
     train_num_steps = args.train_steps, # total training steps

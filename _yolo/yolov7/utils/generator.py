@@ -180,8 +180,8 @@ class plate_generator():
         self.colours_mode = [(0,0), (1,2), (3,4)]
         self.blank_plate = [cv2.imread(self.bg_path[0]), cv2.imread(self.bg_path[1])]
         
-        self.aug_adj_shadow=True
-        self.negative_sample=True
+        self.aug_adj_shadow=False
+        self.negative_sample=False
         print('self.aug_adj_shadow = %s'%self.aug_adj_shadow)
         print('self.negative_sample = %s'%self.negative_sample)
         
@@ -194,8 +194,8 @@ class plate_generator():
         if self.negative_sample: 
             #ratio is 0.5 pos 0.5 neg
             flag_neg = torch.rand(1)
-            if flag_neg < 1:
-                return bg_image, []
+            if flag_neg < 0.5:
+                return bg_image, [[0,-10000,-10000,-10000,-10000]]
             
 
         mode1  = np.random.randint(5)

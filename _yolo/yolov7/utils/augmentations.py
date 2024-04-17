@@ -20,10 +20,10 @@ class mix_augmentaion(object):
             self.multi_base=0.0001
             self.exp_base=self.compute_pow(self.multi_base,1,99)
             
-        self.flags_spot_light=False
-        self.flags_rain=False
-        self.flags_gamma=False
-        self.flags_pixelate=False
+        self.flags_spot_light=True
+        self.flags_rain=True
+        self.flags_gamma=True
+        self.flags_pixelate=True
         print('self.flags_spot_light = %s'%self.flags_spot_light)
         print('self.flags_rain = %s'%self.flags_rain)
         print('self.flags_gamma = %s'%self.flags_gamma)

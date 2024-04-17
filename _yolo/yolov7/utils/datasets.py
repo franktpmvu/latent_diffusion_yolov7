@@ -1027,6 +1027,7 @@ class LoadImagesAndLabels_generate(Dataset):  # for training
             if labels.size:
                 #print('h,w,padw,padh = %d, %d, %d, %d'%(w,h,padw,padh))
                 #print(labels[:, 1:])
+                #print(labels4)
                 labels[:, 1:] = xywhn2xyxy(labels[:, 1:], w, h, padw, padh)  # normalized xywh to pixel xyxy format
                 #print(labels[:, 1:])
 
@@ -1037,12 +1038,13 @@ class LoadImagesAndLabels_generate(Dataset):  # for training
         # Concat/clip labels
         labels4 = np.concatenate(labels4, 0)
         for x in (labels4[:, 1:], *segments4):
-            np.clip(x, 0, 2 * s, out=x)  # clip when using random_perspective()
+                np.clip(x, 0, 2 * s, out=x)  # clip when using random_perspective()
         # img4, labels4 = replicate(img4, labels4)  # replicate
 
         # Augment
         #img4, labels4, segments4 = remove_background(img4, labels4, segments4)
         #sample_segments(img4, labels4, segments4, probability=self.hyp['copy_paste'])
+        
         img4, labels4, segments4 = copy_paste(img4, labels4, segments4, probability=self.hyp['copy_paste'])
         img4, labels4 = random_perspective(img4, labels4, segments4,
                                            degrees=self.hyp['degrees'],

@@ -491,7 +491,8 @@ def cosine_beta_schedule(timesteps, s = 0.008):
 
 import torch
 import torchvision
-
+    
+    
 class GaussianDiffusion(nn.Module):
     def __init__(
         self,
@@ -1249,15 +1250,107 @@ class GaussianDiffusion(nn.Module):
             dsa
             return 0
 
+        
+class interpolateDiffusion(GaussianDiffusion):
+    def p_losses_pair(self, x_start, x_blur, t):
+        b, c, h, w = x_start.shape
+        
+        x_start_latent,y_start = self.yolomodel.forward_submodel(x_start,self.yolomodel.before_diffusion_model,output_y=True)
+        x_blur_latent,y = self.yolomodel.forward_submodel(x_blur,self.yolomodel.before_diffusion_model,output_y=True)
+        
+        zero_step = torch.zeros((b,)).to(t.device)
+        
+        gaussian_latent= torch.randn_like(x_start_latent).to(t.device) #need chage to latent space
+        g_step = torch.randint(0, self.g_steps, (b,), device=t.device).long()
+        x0_mix_gaussian = self.q_sample_gaussian(x_start=x_start_latent, x_end=gaussian_latent, t=g_step)
+        
+        interpolate_step = torch.randint(0, self.t_steps, (b,), device=t.device).long()
+        mix_t_step = t*(interpolate_step/self.t_steps)
+        x_interpolate= self.q_sample_gaussian(x_start=x_start_latent, x_end=x_blur_latent, t=interpolate_step)
+        
+        xtg_latent = self.q_sample_gaussian(x_start=x_blur_latent, x_end=gaussian_latent, t=g_step)
+        xitg_latent = self.q_sample_gaussian(x_start=x_interpolate, x_end=gaussian_latent, t=g_step)
+        
+        x_recon_g = self.denoise_fn(x0_mix_gaussian, zero_step, g_step)
+        x_recon_t = self.denoise_fn(x_blur_latent, t, zero_step)
+        x_recon_it = self.denoise_fn(x_interpolate, mix_t_step, zero_step)
+        x_recon_tg = self.denoise_fn(xtg_latent, t, g_step)
+        x_recon_itg = self.denoise_fn(xitg_latent, mix_t_step, g_step)
+
+
+        if self.loss_type == 'l1':
+            loss = (x_start_latent - x_recon_g).abs().mean() +...
+            (x_start_latent - x_recon_t).abs().mean() +...
+            (x_start_latent - x_recon_tg).abs().mean() +...
+            (x_start_latent - x_recon_it).abs().mean() +...
+            (x_start_latent - x_recon_itg).abs().mean()
+            
+            
+        elif self.loss_type == 'l1_with_last_layer':
+            loss_latent = 0
+            loss_latent += (x_start_latent - x_recon_g).abs().mean()
+            loss_latent += (x_start_latent - x_recon_t).abs().mean() 
+            loss_latent += (x_start_latent - x_recon_tg).abs().mean()
+            loss_latent += (x_start_latent - x_recon_it).abs().mean()
+            loss_latent += (x_start_latent - x_recon_itg).abs().mean()
+            
+            
+            # noise from raining etc
+            x_start_yolo = self.yolomodel.forward_submodel(x_start_latent,self.yolomodel.after_diffusion_model,init_y=y_start)
+            x_start_yolo_1d = self.change_yolo_detect_to_1d(x_start_yolo,b)
+            
+            y[-1]=x_recon_t
+            x_recon_t_yolo = self.yolomodel.forward_submodel(x_recon_t,self.yolomodel.after_diffusion_model,init_y=y)
+            x_recon_t_yolo_1d = self.change_yolo_detect_to_1d(x_recon_t_yolo,b)
+
+            y[-1]=x_recon_g
+            x_recon_g_yolo = self.yolomodel.forward_submodel(x_recon_g,self.yolomodel.after_diffusion_model,init_y=y)
+            x_recon_g_yolo_1d = self.change_yolo_detect_to_1d(x_recon_g_yolo,b)
+
+            
+            y[-1]=x_recon_tg
+            x_recon_tg_yolo = self.yolomodel.forward_submodel(x_recon_tg,self.yolomodel.after_diffusion_model,init_y=y)
+            x_recon_tg_yolo_1d = self.change_yolo_detect_to_1d(x_recon_tg_yolo,b)
+
+            y[-1]=x_recon_it
+            x_recon_it_yolo = self.yolomodel.forward_submodel(x_recon_it,self.yolomodel.after_diffusion_model,init_y=y)
+            x_recon_it_yolo_1d = self.change_yolo_detect_to_1d(x_recon_it_yolo,b)
+            
+            y[-1]=x_recon_itg
+            x_recon_itg_yolo = self.yolomodel.forward_submodel(x_recon_itg,self.yolomodel.after_diffusion_model,init_y=y)
+            x_recon_itg_yolo_1d = self.change_yolo_detect_to_1d(x_recon_itg_yolo,b)
+
+
+            
+            loss_last_yolo =0
+            loss_last_yolo += (x_start_yolo_1d - x_recon_t_yolo_1d).abs().mean() 
+            loss_last_yolo += (x_start_yolo_1d - x_recon_g_yolo_1d).abs().mean() 
+            loss_last_yolo += (x_start_yolo_1d - x_recon_tg_yolo_1d).abs().mean() 
+            loss_last_yolo += (x_start_yolo_1d - x_recon_it_yolo_1d).abs().mean() 
+            loss_last_yolo += (x_start_yolo_1d - x_recon_itg_yolo_1d).abs().mean() 
+            
+            #print('loss_latent = %.05f, loss_last_yolo = %.05f'%(loss_latent,loss_last_yolo))
+            
+
+            
+            loss = loss_latent+loss_last_yolo
+            
+        elif self.loss_type == 'l2':
+            raise NotImplementedError()
+            #loss = F.mse_loss(x_start_latent, x_recon)
+        else:
+            raise NotImplementedError()
+        return loss
     
     
 class Dataset_cv2_aug_step(data.Dataset):
-    def __init__(self, folder, augmenter, image_size, exts = ['jpg', 'jpeg', 'png'], evalMode=False, labelTxtFolder=None):
+    def __init__(self, folder, augmenter, image_size, exts = ['jpg', 'jpeg', 'png'], evalMode=False, labelTxtFolder=None, output_max_noise=False):
         super().__init__()
         self.folder = folder
         self.image_size = image_size
         self.augmenter = augmenter
         self.evalMode = evalMode
+        self.output_max_noise = output_max_noise
         #self.paths = [p for ext in exts for p in Path(f'{folder}').glob(f'**/*.{ext}')]
         self.paths=[]
         self.bname=[]
@@ -1329,7 +1422,11 @@ class Dataset_cv2_aug_step(data.Dataset):
 
         
         step = randint(0,99)
+        
         img_blur = self.augmenter.mix_aug(copy.deepcopy(img), step*0.01, random=True)
+        if self.output_max_noise:
+            img_blur_max = self.augmenter.mix_aug(copy.deepcopy(img), int(99))
+            img_blur_max_torch = self.npytotorch(img_blur_max)
 
         img_torch = self.npytotorch(img)
         img_blur_torch = self.npytotorch(img_blur)
@@ -1342,7 +1439,10 @@ class Dataset_cv2_aug_step(data.Dataset):
             return [img_torch, img_blur_torch, step, meta, bname]
 
         else:
-            return [img_torch, img_blur_torch, step]
+            if self.output_max_noise:
+                return [img_torch, img_blur_torch, img_blur_max_torch, step]
+            else:
+                return [img_torch, img_blur_torch, step]
     
     def npytotorch(self, img):
         img = (img / 255.).astype(np.float32)
@@ -1470,7 +1570,7 @@ class Trainer(object):
         if not test_mode:
             
             wandb.init(
-                project="diffusion_latent_ep79_512_2noise_t100_g10_predictnoise_wotimeemb",
+                project="diffusion_latent_ep79_512_2noise_t100_g10_interpolate",
                 config={
                 'ema_decay':ema_decay,
                 'image_size':image_size,

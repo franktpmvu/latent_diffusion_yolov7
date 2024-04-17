@@ -7,6 +7,10 @@ from scipy.stats import norm
 from matplotlib import pyplot as plt
 import torch
 import math
+import time
+from scipy.ndimage import gaussian_filter
+from skimage.color import rgb2hsv, hsv2rgb
+
 
 class mix_augmentaion(object):
     def __init__(self,imshape=(256,256),noiseStepMode='direct'):
@@ -15,40 +19,58 @@ class mix_augmentaion(object):
         if noiseStepMode=='exp':
             self.multi_base=0.0001
             self.exp_base=self.compute_pow(self.multi_base,1,99)
+            
+        self.flags_spot_light=True
+        self.flags_rain=True
+        self.flags_gamma=True
+        self.flags_pixelate=True
+        print('self.flags_spot_light = %s'%self.flags_spot_light)
+        print('self.flags_rain = %s'%self.flags_rain)
+        print('self.flags_gamma = %s'%self.flags_gamma)
+        print('self.flags_pixelate = %s'%self.flags_pixelate)
+
         self.random_parameter()
         
     def random_parameter(self,h=None,w=None,rain_slant=None,spotlignt_position=None,spotlight_reverse=None,spotlight_transparency=None,gamma=None,pixelate_blocks=None):
         #rain
-        if rain_slant is None:
-            rain_slant = np.random.randint(-10, 10) # generate random slant if no slant value is given
+        if self.flags_rain:
+            if rain_slant is None:
+                rain_slant = np.random.randint(-10, 10) # generate random slant if no slant value is given
+
+            self.rain_slant = rain_slant
+            self.rain_drops, self.rain_width = self.generate_random_lines(self.imshape, self.rain_slant)
+
         #spot_light
-        if spotlight_reverse is None:
-            spotlight_reverse=False
-            if np.random.random(size=1)>0.5:
-                spotlight_reverse=True
-        if spotlight_transparency is None:
-            spotlight_transparency = random.uniform(0.5, 0.85)
-        if spotlignt_position is None:
-            spotlignt_position = [(random.random(), random.random())]
+        if self.flags_spot_light:
+            if spotlight_reverse is None:
+                spotlight_reverse=False
+                if np.random.random(size=1)>0.5:
+                    spotlight_reverse=True
+            if spotlight_transparency is None:
+                spotlight_transparency = random.uniform(0.5, 0.85)
+            if spotlignt_position is None:
+                spotlignt_position = [(random.random(), random.random())]
+
+            self.spotlight_reverse = spotlight_reverse
+            self.spotlight_transparency = spotlight_transparency
+            self.spotlignt_position = spotlignt_position
+
 
         #gamma
-        if gamma is None:
-            gamma = np.random.randint(40,91) / 100.0
-        if pixelate_blocks is None:
+        if self.flags_gamma:
+            if gamma is None:
+                gamma = np.random.randint(40,91) / 100.0
+            self.gamma = gamma
+
             
-            #print(int(self.imshape[0]*0.2))
-            #print(int(self.imshape[0]*0.3))
-            pixelate_blocks = np.random.randint(int(self.imshape[0]*0.2),int(self.imshape[0]*0.3))#0.2 : 0.3 hw
-        
-        self.rain_slant = rain_slant
-        self.rain_drops, self.rain_width = self.generate_random_lines(self.imshape, self.rain_slant)
+        #pixelate
+        if self.flags_pixelate:
+            if pixelate_blocks is None:
 
-
-        self.spotlight_reverse = spotlight_reverse
-        self.spotlight_transparency = spotlight_transparency
-        self.spotlignt_position = spotlignt_position
-        self.gamma = gamma
-        self.pixelate_blocks = pixelate_blocks
+                #print(int(self.imshape[0]*0.2))
+                #print(int(self.imshape[0]*0.3))
+                pixelate_blocks = np.random.randint(int(self.imshape[0]*0.2),int(self.imshape[0]*0.3))#0.2 : 0.3 hw
+            self.pixelate_blocks = pixelate_blocks
     
 
         
@@ -242,6 +264,22 @@ class mix_augmentaion(object):
         frame[frame < 0] = 0
         frame = np.asarray(frame, dtype=np.uint8)
         return frame
+    
+    def convert_to_hsv_and_modify(self, image):
+        hsl_image = rgb2hsv(image)
+        # Create a heavily smoothed random background patch
+        
+        patch = np.random.rand(self.imshape[0], self.imshape[1], 3)
+        patch_smoothed = gaussian_filter(patch, sigma=50)
+        # Average lightness
+        hsl_image[:, :, 2] = (hsl_image[:, :, 2] + patch_smoothed[:, :, 2]) / 2
+        # Random shifts and stretches on HSV channels
+        hsl_image[:, :, 0] = np.clip(hsl_image[:, :, 0] + np.random.uniform(-0.1, 0.1), 0, 1)
+        hsl_image[:, :, 1] = np.clip(hsl_image[:, :, 1] * np.random.uniform(0.9, 1.1), 0, 1)
+        hsl_image[:, :, 2] = np.clip(hsl_image[:, :, 2] * np.random.uniform(0.9, 1.1), 0, 1)
+        modified_rgb = hsv2rgb(hsl_image)
+        return modified_rgb
+
 
     def adjust_gamma(self,image, gamma=None):
         image=copy.deepcopy(image)
@@ -335,8 +373,15 @@ class mix_augmentaion(object):
         
         
     def mix_aug(self, img, step, random=False):
+        
+        
+        
+        #start_time = time.time()
+        
+        #init_time = time.time()
         # img= numpy [255,255,3]
         # step= 0~1
+        #print('mix_aug step =%.05f'%step)
         if random:
             self.random_parameter()
         if self.noiseStepMode=='exp':
@@ -345,18 +390,55 @@ class mix_augmentaion(object):
         #print(np.min(img))
         img = img.astype(np.uint8)
         height, width, _ = img.shape
-        pos = [(self.spotlignt_position[0][0]*width,self.spotlignt_position[0][1]*height)]
         #self.pixelate_blocks=60
-        img = self.add_rain_step(img,step_ratio=step,slant = self.rain_slant)
-        img = self.add_spot_light_step(img,step_ratio=step,light_position=pos,transparency=self.spotlight_transparency,reverse=self.spotlight_reverse)
-        #print(1-(1-self.gamma)*step)
-        #print('dsadsada')
-        img = self.adjust_gamma(img,gamma=1-(1-self.gamma)*step)
-        #img = self.pixelate(img,blocks=self.pixelate_blocks,step_ratio=step)
+        #print("Total time taken init_time = {} seconds".format( time.time() - init_time))  # print total computation time
 
-        img = self.deresolution(img,blocks=self.pixelate_blocks,step_ratio=step)
+        
+        
+        # add_rain
+        #add_rain_time = time.time()
+        
+        
+        if self.flags_rain:
+            img = self.add_rain_step(img, step_ratio=step, slant = self.rain_slant)
+            #print("Total time taken add_rain_time = {} seconds".format( time.time() - add_rain_time))  # print total computation time
+            # random shift in hsv
+            #shift_hsv_time = time.time()
+            #img = self.convert_to_hsv_and_modify(img)
+            #print("Total time taken shift_hsv_time = {} seconds".format( time.time() - shift_hsv_time))  # print total computation time
 
-        #img = self.pixelate_cv2(img,blocks=self.pixelate_blocks,step_ratio=step)
+        
+        
+        # add_spot_light
+        #add_spot_light_time = time.time()
+        
+        if self.flags_spot_light:
+            pos = [(self.spotlignt_position[0][0]*width,self.spotlignt_position[0][1]*height)]
+            img = self.add_spot_light_step(img,step_ratio=step,light_position=pos,transparency=self.spotlight_transparency,reverse=self.spotlight_reverse)
+            #print("Total time taken add_spot_light_time = {} seconds".format( time.time() - add_spot_light_time))  # print total computation time
+
+
+            #print(1-(1-self.gamma)*step)
+            #print('dsadsada')
+        
+        if self.flags_gamma:
+            # adj gamma
+            #gamma_time = time.time()
+
+            img = self.adjust_gamma(img,gamma=1-(1-self.gamma)*step)
+            #img = self.pixelate(img,blocks=self.pixelate_blocks,step_ratio=step)
+            #print("Total time taken gamma_time = {} seconds".format( time.time() - gamma_time))  # print total computation time
+
+        
+        
+        if self.flags_pixelate:
+            # deresolution
+            #de_resolution_time = time.time()
+            img = self.deresolution(img, blocks=self.pixelate_blocks, step_ratio=step)
+
+            #print("Total time taken mix_aug = {} seconds".format( time.time() - start_time))  # print total computation time
+
+            #img = self.pixelate_cv2(img,blocks=self.pixelate_blocks,step_ratio=step)
 
         return img
     

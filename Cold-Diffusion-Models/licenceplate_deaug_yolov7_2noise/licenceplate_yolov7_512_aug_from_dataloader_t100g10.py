@@ -1,4 +1,4 @@
-from licenceplate_deaug_pytorch.licenceplate_deaug_pytorch_aug_in_dataloader_2noise import Unet_2timeEmb, GaussianDiffusion, Trainer
+from licenceplate_deaug_pytorch.licenceplate_deaug_pytorch_aug_in_dataloader_2noise import Unet_2timeEmb, GaussianDiffusion, Trainer, interpolateDiffusion
 import torchvision
 import argparse
 import sys
@@ -35,6 +35,7 @@ parser.add_argument('--sampling_routine', default='x0_step_down', type=str)
 parser.add_argument('--remove_time_embed', action="store_true")
 parser.add_argument('--residual', action="store_true")
 parser.add_argument('--predict_noise', action="store_true")
+parser.add_argument('--interpolate_noise', action="store_true")
 parser.add_argument('--loss_type', default='l1', type=str)#l1,l1_with_last_layer
 parser.add_argument('--yolomodel', default='/data/licence_plate/_yolo/yolov7/runs/train/exp2/weights/best_288_state_dict.pt', type=str)
 parser.add_argument('--yolohyperparam', default='/data/licence_plate/_yolo/yolov7/cfg/deploy/hyp.scratch.tiny.yaml', type=str)
@@ -84,20 +85,38 @@ model = Unet_2timeEmb(
     predict_noise=args.predict_noise
 ).cuda()
 
-diffusion = GaussianDiffusion(
-    model,
-    image_size = 64,
-    device_of_kernel = 'cuda',
-    channels = 128,
-    timesteps = args.time_steps,        # number of steps
-    t_steps = args.t_steps,        # number of steps
-    g_steps = args.g_steps,        # number of steps
-    loss_type = args.loss_type,                   # L1 or L2
-    aug_routine=args.aug_routine,
-    train_routine = args.train_routine,
-    sampling_routine = args.sampling_routine,
-    yolomodel=yolomodel
-).cuda()
+if args.interpolate_noise:
+    diffusion = interpolateDiffusion(
+        model,
+        image_size = 64,
+        device_of_kernel = 'cuda',
+        channels = 128,
+        timesteps = args.time_steps,        # number of steps
+        t_steps = args.t_steps,        # number of steps
+        g_steps = args.g_steps,        # number of steps
+        loss_type = args.loss_type,                   # L1 or L2
+        aug_routine=args.aug_routine,
+        train_routine = args.train_routine,
+        sampling_routine = args.sampling_routine,
+        yolomodel=yolomodel
+    ).cuda()
+
+else:
+    
+    diffusion = GaussianDiffusion(
+        model,
+        image_size = 64,
+        device_of_kernel = 'cuda',
+        channels = 128,
+        timesteps = args.time_steps,        # number of steps
+        t_steps = args.t_steps,        # number of steps
+        g_steps = args.g_steps,        # number of steps
+        loss_type = args.loss_type,                   # L1 or L2
+        aug_routine=args.aug_routine,
+        train_routine = args.train_routine,
+        sampling_routine = args.sampling_routine,
+        yolomodel=yolomodel
+    ).cuda()
 
 import torch
 diffusion = torch.nn.DataParallel(diffusion, device_ids=range(torch.cuda.device_count()))
